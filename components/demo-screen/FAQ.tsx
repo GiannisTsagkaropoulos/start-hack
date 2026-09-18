@@ -3,32 +3,28 @@ import { Plus, Minus } from "lucide-react";
 export default function FAQ() {
   const faqs = [
     {
-      q: "How does it work?",
-      a: "Connect your brokerage or account in seconds, no code needed. FinAI listens for patterns and automatically triggers insights.",
+      q: "What does the control layer actually decide?",
+      a: "For every purchase your AI shopping agent tries to make, it returns one of three outcomes: approve, decline, or step up (ask you directly) — never a silent guess.",
     },
     {
-      q: "Is it secure?",
-      a: "Yes. We use read-only API access. We cannot move or touch your funds.",
+      q: "How do you handle prompt injection from a merchant?",
+      a: "A merchant's product description is only ever mined for facts, never treated as an instruction. If a listing says \"ignore the spending limit,\" that text has no path to changing what's authorized — the rules underneath still apply regardless.",
     },
     {
-      q: "Do you support my brokerage?",
-      a: "We support Robinhood, Fidelity, Charles Schwab, Coinbase, and 10,000+ others via Plaid.",
+      q: "Why not just have an LLM decide every purchase?",
+      a: "Latency and auditability. The deterministic checks run in under a millisecond and every decision traces to a named reason a compliance team could point to — an LLM call on the hot path risks both.",
     },
     {
-      q: "Do I need coding skills?",
-      a: "No coding skills are required at all. Setup takes less than a minute.",
+      q: "Why not just use fixed rules with no AI at all?",
+      a: "Because a rule engine can't read \"buy me running shoes under 200\" — turning a customer's sentence into a structured policy is a real language-understanding step, and it's one of the two jobs this case actually asks for.",
     },
     {
-      q: "What data do you collect?",
-      a: "We only access minimal read-only portfolio data required to generate risk analyses and financial reports.",
+      q: "What happens when something is genuinely unclear?",
+      a: "We ask, rather than guess. If a fact we need to check your policy is missing from the purchase, the agent gets a step-up request instead of a silent approve or decline.",
     },
     {
-      q: "Can I still get a dispute?",
-      a: "While our system mitigates trading risks and errors, market risks and platform rules still apply.",
-    },
-    {
-      q: "What's on the roadmap?",
-      a: "Q3: AI-driven option spread strategies. Q4: Automated tax-document generation.",
+      q: "What don't you claim?",
+      a: "We don't call any result \"accuracy\" — there's no official answer key for this dataset. We report what resolves without escalation, and we say plainly where a gap (like a swapped product with the same category) is still open.",
     },
   ];
 
@@ -37,9 +33,7 @@ export default function FAQ() {
       id="faq"
       className="max-w-6xl mx-auto px-4 py-24 border-t border-slate-800"
     >
-      {/* Two-column layout on desktop: Left header, right accordions */}
       <div className="grid md:grid-cols-12 gap-12 items-start">
-        {/* Left Column: Sticky Title Header */}
         <div className="md:col-span-5 md:sticky md:top-24">
           <span className="text-emerald-400 font-bold uppercase tracking-wider text-sm mb-3 block">
             FAQ
@@ -49,7 +43,6 @@ export default function FAQ() {
           </h2>
         </div>
 
-        {/* Right Column: Accordions List */}
         <div className="md:col-span-7 divide-y divide-slate-800 border-t border-b border-slate-800">
           {faqs.map((faq, i) => (
             <details
@@ -58,7 +51,6 @@ export default function FAQ() {
             >
               <summary className="flex cursor-pointer items-center justify-between font-semibold text-lg text-slate-800 list-none group-open:text-emerald-400 hover:text-slate-500 transition-colors">
                 <span>{faq.q}</span>
-                {/* Switches between Plus and Minus icon dynamically when opened */}
                 <span className="text-slate-400 group-open:text-emerald-400 shrink-0 ml-4">
                   <Plus size={20} className="block group-open:hidden" />
                   <Minus size={20} className="hidden group-open:block" />
