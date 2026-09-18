@@ -37,19 +37,6 @@ export default function LandingPage() {
             Configure a wallet <ArrowRight size={20} />
           </Link>
         </div>
-
-        {/* Validation / Social Proof */}
-        {/* <div className="mt-12 flex flex-col items-center gap-3">
-          <div className="flex -space-x-3">
-            {[1, 2, 3, 4, 5].map((i) => (
-              <img key={i} src={`https://i.pravatar.cc/100?img=${i + 10}`} alt="User" className="w-10 h-10 rounded-full border-2 border-[#0B0F19]" />
-            ))}
-          </div>
-          <div className="flex items-center gap-2 text-sm text-slate-400">
-            <div className="flex text-yellow-400"><Star size={16} fill="currentColor" /><Star size={16} fill="currentColor" /><Star size={16} fill="currentColor" /><Star size={16} fill="currentColor" /><Star size={16} fill="currentColor" /></div>
-            <span>Trusted by 2,400+ investors</span>
-          </div>
-        </div> */}
       </section>
 
       {/* Problem vs Solution (The ZenVoice Style) */}

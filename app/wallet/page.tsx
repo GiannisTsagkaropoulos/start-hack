@@ -8,29 +8,55 @@ import {
   ArrowRight,
   Check,
   CheckCircle2,
+  PlusCircle,
+  RefreshCw,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
-
-type ParsedPolicy = {
-  walletId: number;
-  firstWord: string;
-  originalText: string;
-  missingFields: string[];
-};
 
 type Step = "select" | "describe" | "review";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+const DEFAULT_POLICY = {
+  raw_instructions: "",
+  spending: {
+    per_item_purchase_price_max: null,
+    per_period_purchase_price_max: null,
+    currency: null,
+    period_in_days: null,
+  },
+  merchant: {
+    familiarity_required: null,
+    familiarity_min_prior_approved: 0,
+    blocklist: [],
+    allowlist: [],
+  },
+  order_terms: {
+    require_returnable: null,
+    require_cancellable: null,
+  },
+  session: {
+    max_recent_attempts_10m: null,
+    trusted_devices_only: true,
+    domestic_only: null,
+  },
+  duplicate_check: {
+    block_repeats_within_minutes: null,
+  },
+  notes_for_customer: "",
+};
+
 export default function WalletPage() {
   const [step, setStep] = useState<Step>("select");
   const [walletId, setWalletId] = useState("");
   const [policyText, setPolicyText] = useState("");
-  const [parsedPolicy, setParsedPolicy] = useState<ParsedPolicy | null>(null);
-  const [maxPrice, setMaxPrice] = useState("");
-  const [refundable, setRefundable] = useState("");
+  const [additionalText, setAdditionalText] = useState("");
+  const [missingFields, setMissingFields] = useState<string[]>([]);
+  const [draftPolicy, setDraftPolicy] = useState<any>(DEFAULT_POLICY);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isReparsing, setIsReparsing] = useState(false);
   const [error, setError] = useState("");
   const [isConfirmed, setIsConfirmed] = useState(false);
 
@@ -39,15 +65,31 @@ export default function WalletPage() {
     [step],
   );
 
-  const selectWallet = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const updatePolicyValue = (path: string, value: any) => {
+    const keys = path.split(".");
+    setDraftPolicy((prev: any) => {
+      const updated = structuredClone(prev);
+      let current = updated;
+      for (let i = 0; i < keys.length - 1; i++) {
+        if (!current[keys[i]]) current[keys[i]] = {};
+        current = current[keys[i]];
+      }
+      current[keys[keys.length - 1]] = value;
+      return updated;
+    });
+
+    setMissingFields((prev) => prev.filter((field) => field !== path));
+  };
+
+  const selectWallet = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
     if (!walletId) return;
     setStep("describe");
     setError("");
   };
 
-  const submitPolicy = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const submitPolicy = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
     if (!policyText.trim()) return;
 
     setIsSubmitting(true);
@@ -55,7 +97,7 @@ export default function WalletPage() {
     setIsConfirmed(false);
 
     try {
-      const response = await fetch(`${API_URL}/parse-policy`, {
+      const res = await fetch(`${API_URL}/parse-policy`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -64,43 +106,87 @@ export default function WalletPage() {
         }),
       });
 
-      if (!response.ok) {
-        throw new Error("The policy could not be parsed.");
-      }
+      if (!res.ok) throw new Error("Failed to parse the policy.");
 
-      const data = (await response.json()) as ParsedPolicy;
-      setParsedPolicy(data);
+      const data = await res.json();
+      setDraftPolicy(data.policy);
+      setMissingFields(data.missingFields || []);
       setStep("review");
-    } catch (submissionError) {
-      setError(
-        submissionError instanceof Error
-          ? submissionError.message
-          : "Something went wrong while parsing the policy.",
-      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error parsing policy.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const goBack = () => {
+  const handleReparseWithMoreInfo = async () => {
+    if (!additionalText.trim()) return;
+
+    setIsReparsing(true);
     setError("");
-    setIsConfirmed(false);
-    setStep(step === "review" ? "describe" : "select");
+
+    try {
+      const res = await fetch(`${API_URL}/parse-policy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          wallet_id: Number(walletId),
+          policy_text: policyText,
+          additional_text: additionalText,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed to update policy with new details.");
+
+      const data = await res.json();
+      setDraftPolicy(data.policy);
+      setMissingFields(data.missingFields || []);
+      setPolicyText((prev) => `${prev}\n\n${additionalText}`);
+      setAdditionalText("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error updating policy.");
+    } finally {
+      setIsReparsing(false);
+    }
   };
 
-  const confirmPolicy = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setIsConfirmed(true);
-  };
+  const confirmPolicy = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    setError("");
 
-  const hasMissingFields = Boolean(parsedPolicy?.missingFields.length);
+    try {
+      const res = await fetch(`${API_URL}/confirm-policy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          wallet_id: Number(walletId),
+          policy: draftPolicy,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail?.[0]?.msg || "Validation failed.");
+      }
+
+      setIsConfirmed(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Confirmation failed.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <main className="min-h-screen bg-[#f7f9f7] text-slate-900">
-      <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-5 py-8 sm:px-8">
+      <div className="mx-auto flex min-h-screen w-full max-w-4xl flex-col px-5 py-8 sm:px-8">
         <header className="flex items-center justify-between">
-          <Link href="/" className="text-lg font-bold tracking-tight text-slate-800">
-            Control<span className="text-emerald-600">Layer</span>
+          <Link
+            href="/"
+            className="text-lg font-bold tracking-tight text-slate-800"
+          >
+            Viseca<span className="text-emerald-600">AI-shopper</span>
           </Link>
           <div className="flex items-center gap-2 text-sm font-medium text-slate-500">
             <ShieldCheck size={18} className="text-emerald-600" />
@@ -108,48 +194,33 @@ export default function WalletPage() {
           </div>
         </header>
 
-        <section className="mx-auto w-full max-w-2xl flex-1 py-14 sm:py-20">
-          <div className="mb-10 flex items-center justify-between">
+        <section className="mx-auto w-full max-w-2xl flex-1 py-10 sm:py-14">
+          <div className="mb-8 flex items-center justify-between">
             <div>
-              <p className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-emerald-600">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">
                 Step {progress} of 3
               </p>
-              <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+              <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
                 {step === "select" && "Choose a wallet"}
                 {step === "describe" && "Describe your shopping rules"}
                 {step === "review" && "Review your wallet policy"}
               </h1>
             </div>
-            <div className="hidden items-center gap-2 sm:flex" aria-label={`Step ${progress} of 3`}>
-              {[1, 2, 3].map((item) => (
-                <span
-                  key={item}
-                  className={`h-2 w-10 rounded-full ${
-                    item <= progress ? "bg-emerald-500" : "bg-slate-200"
-                  }`}
-                />
-              ))}
-            </div>
           </div>
 
           {step === "select" && (
-            <form onSubmit={selectWallet} className="space-y-8">
-              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-                <div className="mb-7 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
+            <form onSubmit={selectWallet} className="space-y-6">
+              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
                   <Sparkles size={24} />
                 </div>
-                <h2 className="mb-2 text-xl font-semibold">Which wallet should we configure?</h2>
-                <p className="mb-7 text-slate-500">
-                  Select one of the demo wallets. Your policy stays tied to this wallet.
-                </p>
-                <label htmlFor="wallet-id" className="mb-2 block text-sm font-semibold text-slate-700">
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
                   Wallet ID
                 </label>
                 <select
-                  id="wallet-id"
                   value={walletId}
-                  onChange={(event) => setWalletId(event.target.value)}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10"
+                  onChange={(e) => setWalletId(e.target.value)}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base outline-none focus:border-emerald-500"
                   required
                 >
                   <option value="">Select an ID</option>
@@ -162,8 +233,8 @@ export default function WalletPage() {
               </div>
               <button
                 type="submit"
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-3.5 font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
                 disabled={!walletId}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-3.5 font-semibold text-white hover:bg-slate-700 disabled:opacity-40"
               >
                 Continue <ArrowRight size={18} />
               </button>
@@ -171,115 +242,246 @@ export default function WalletPage() {
           )}
 
           {step === "describe" && (
-            <form onSubmit={submitPolicy} className="space-y-8">
-              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-                <div className="mb-6 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-500">Configuring</p>
-                    <p className="font-semibold text-slate-800">Wallet {walletId}</p>
-                  </div>
-                  <button type="button" onClick={goBack} className="text-sm font-semibold text-slate-500 hover:text-slate-900">
-                    Change wallet
-                  </button>
-                </div>
-                <label htmlFor="policy-text" className="mb-2 block text-sm font-semibold text-slate-700">
-                  What should the shopping agent be allowed to buy?
+            <form onSubmit={submitPolicy} className="space-y-6">
+              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
+                  What do you want the agent to buy?
                 </label>
                 <textarea
-                  id="policy-text"
                   value={policyText}
-                  onChange={(event) => setPolicyText(event.target.value)}
-                  placeholder="Example: Buy running shoes, size 42, under €120. Only choose items that can be returned."
-                  className="min-h-44 w-full resize-y rounded-xl border border-slate-300 px-4 py-3 text-base leading-7 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10"
+                  onChange={(e) => setPolicyText(e.target.value)}
+                  placeholder="Example: Buy running shoes under €120. Require returnable items and allow trusted devices only."
+                  className="min-h-36 w-full rounded-xl border border-slate-300 px-4 py-3 text-base outline-none focus:border-emerald-500"
                   required
                 />
-                <p className="mt-3 text-sm text-slate-500">
-                  Use natural language. In this first prototype, the backend echoes the first word and checks for a couple of policy controls.
-                </p>
               </div>
               {error && <ErrorMessage message={error} />}
-              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
-                <button type="button" onClick={goBack} className="flex items-center justify-center gap-2 rounded-xl px-5 py-3.5 font-semibold text-slate-600 hover:bg-slate-200/60">
+              <div className="flex justify-between">
+                <button
+                  type="button"
+                  onClick={() => setStep("select")}
+                  className="flex items-center gap-2 rounded-xl px-4 py-3 font-semibold text-slate-600 hover:bg-slate-200"
+                >
                   <ArrowLeft size={18} /> Back
                 </button>
                 <button
                   type="submit"
                   disabled={!policyText.trim() || isSubmitting}
-                  className="flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-3.5 font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3.5 font-semibold text-white hover:bg-slate-700 disabled:opacity-40"
                 >
-                  {isSubmitting ? "Parsing policy..." : "Parse policy"} <ArrowRight size={18} />
+                  {isSubmitting ? "Parsing..." : "Parse policy"}{" "}
+                  <ArrowRight size={18} />
                 </button>
               </div>
             </form>
           )}
 
-          {step === "review" && parsedPolicy && (
-            <form onSubmit={confirmPolicy} className="space-y-6">
-              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-                <div className="mb-7 flex items-start justify-between gap-4">
+          {step === "review" && (
+            <form onSubmit={confirmPolicy} className="space-y-8">
+              {/* Header Status */}
+              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex items-start justify-between">
                   <div>
-                    <p className="mb-1 text-sm text-slate-500">Parsed for Wallet {parsedPolicy.walletId}</p>
-                    <h2 className="text-xl font-semibold">Here is what we understood</h2>
+                    <h2 className="text-xl font-semibold">
+                      Here is what we extracted
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      All fields are listed in schema order and are fully
+                      editable.
+                    </p>
                   </div>
-                  <CheckCircle2 className="shrink-0 text-emerald-500" size={28} />
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <SummaryItem label="First word detected" value={parsedPolicy.firstWord} />
-                  <SummaryItem label="Policy text" value={parsedPolicy.originalText} />
+                  <CheckCircle2
+                    className="shrink-0 text-emerald-500"
+                    size={28}
+                  />
                 </div>
               </div>
 
-              {hasMissingFields ? (
-                <div className="rounded-3xl border border-amber-200 bg-amber-50/70 p-6 sm:p-8">
-                  <div className="mb-6 flex gap-3">
-                    <AlertCircle className="mt-0.5 shrink-0 text-amber-600" size={22} />
-                    <div>
-                      <h2 className="font-semibold text-slate-900">A few controls still need your input</h2>
-                      <p className="mt-1 text-sm text-slate-600">Complete these fields before confirming the policy.</p>
-                    </div>
-                  </div>
-                  <div className="grid gap-5 sm:grid-cols-2">
-                    {parsedPolicy.missingFields.includes("maxPrice") && (
-                      <label className="text-sm font-semibold text-slate-700">
-                        Maximum price
-                        <div className="mt-2 flex rounded-xl border border-slate-300 bg-white focus-within:border-emerald-500 focus-within:ring-4 focus-within:ring-emerald-500/10">
-                          <span className="flex items-center pl-4 text-slate-500">€</span>
-                          <input required value={maxPrice} onChange={(event) => setMaxPrice(event.target.value)} type="number" min="0" step="0.01" placeholder="120" className="w-full rounded-xl px-2 py-3 outline-none" />
-                        </div>
-                      </label>
-                    )}
-                    {parsedPolicy.missingFields.includes("refundable") && (
-                      <label className="text-sm font-semibold text-slate-700">
-                        Items must be refundable?
-                        <select required value={refundable} onChange={(event) => setRefundable(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 font-normal outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10">
-                          <option value="">Choose one</option>
-                          <option value="yes">Yes, refundable only</option>
-                          <option value="no">No preference</option>
-                        </select>
-                      </label>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-6 text-emerald-900">
-                  <p className="flex items-center gap-2 font-semibold"><Check size={18} /> All required controls were found.</p>
-                </div>
-              )}
+              {/* List of Extracted Fields in Exact Schema Order */}
+              <div className="space-y-6">
+                {/* 1. Raw Instructions */}
+                <SectionBlock title="1. Raw Instructions">
+                  <InputField
+                    label="Raw Instructions"
+                    value={draftPolicy.raw_instructions || ""}
+                    onChange={(val) =>
+                      updatePolicyValue("raw_instructions", val)
+                    }
+                  />
+                </SectionBlock>
+
+                {/* 2. Spending */}
+                <SectionBlock title="2. Spending Controls">
+                  <InputField
+                    label="Max Price Per Item"
+                    type="number"
+                    value={
+                      draftPolicy.spending?.per_item_purchase_price_max ?? ""
+                    }
+                    placeholder="e.g. 120.00"
+                    onChange={(val) =>
+                      updatePolicyValue(
+                        "spending.per_item_purchase_price_max",
+                        val ? parseFloat(val) : null,
+                      )
+                    }
+                  />
+                  <SelectField
+                    label="Currency"
+                    value={draftPolicy.spending?.currency || "CHF"}
+                    options={[
+                      { label: "CHF", value: "CHF" },
+                      { label: "USD", value: "USD" },
+                      { label: "EUR", value: "EUR" },
+                    ]}
+                    onChange={(val) =>
+                      updatePolicyValue("spending.currency", val || null)
+                    }
+                  />
+                  <InputField
+                    label="Max Price Per Period"
+                    type="number"
+                    value={
+                      draftPolicy.spending?.per_period_purchase_price_max ?? ""
+                    }
+                    placeholder="e.g. 500.00"
+                    onChange={(val) =>
+                      updatePolicyValue(
+                        "spending.per_period_purchase_price_max",
+                        val ? parseFloat(val) : null,
+                      )
+                    }
+                  />
+
+                  <InputField
+                    label="Period (in Days)"
+                    type="number"
+                    value={draftPolicy.spending?.period_in_days ?? ""}
+                    placeholder="e.g. 30"
+                    onChange={(val) =>
+                      updatePolicyValue(
+                        "spending.period_in_days",
+                        val ? parseInt(val) : null,
+                      )
+                    }
+                  />
+                </SectionBlock>
+
+                {/* 3. Merchant */}
+                <SectionBlock title="3. Merchant Rules">
+                  <SelectField
+                    label="Familiarity Required"
+                    value={
+                      draftPolicy.merchant?.familiarity_required === null
+                        ? ""
+                        : String(draftPolicy.merchant?.familiarity_required)
+                    }
+                    options={[
+                      { label: "Yes", value: "true" },
+                      { label: "No", value: "false" },
+                    ]}
+                    onChange={(val) =>
+                      updatePolicyValue(
+                        "merchant.familiarity_required",
+                        val === "" ? null : val === "true",
+                      )
+                    }
+                  />
+                </SectionBlock>
+
+                {/* 4. Order Terms */}
+                <SectionBlock title="4. Order Terms">
+                  <SelectField
+                    label="Require Returnable"
+                    value={
+                      draftPolicy.order_terms?.require_returnable === null
+                        ? ""
+                        : String(draftPolicy.order_terms?.require_returnable)
+                    }
+                    options={[
+                      { label: "Yes", value: "true" },
+                      { label: "No preference", value: "false" },
+                    ]}
+                    onChange={(val) =>
+                      updatePolicyValue(
+                        "order_terms.require_returnable",
+                        val === "" ? null : val === "true",
+                      )
+                    }
+                  />
+                  <SelectField
+                    label="Require Cancellable"
+                    value={
+                      draftPolicy.order_terms?.require_cancellable === null
+                        ? ""
+                        : String(draftPolicy.order_terms?.require_cancellable)
+                    }
+                    options={[
+                      { label: "Yes", value: "true" },
+                      { label: "No preference", value: "false" },
+                    ]}
+                    onChange={(val) =>
+                      updatePolicyValue(
+                        "order_terms.require_cancellable",
+                        val === "" ? null : val === "true",
+                      )
+                    }
+                  />
+                </SectionBlock>
+
+                {/* 5. Session */}
+                <SectionBlock title="5. Session Restrictions">
+                  <SelectField
+                    label="Domestic Purchases Only"
+                    value={
+                      draftPolicy.session?.domestic_only === null
+                        ? ""
+                        : String(draftPolicy.session?.domestic_only)
+                    }
+                    options={[
+                      { label: "Yes", value: "true" },
+                      { label: "No", value: "false" },
+                    ]}
+                    onChange={(val) =>
+                      updatePolicyValue(
+                        "session.domestic_only",
+                        val === "" ? null : val === "true",
+                      )
+                    }
+                  />
+                </SectionBlock>
+              </div>
 
               {isConfirmed && (
                 <div className="rounded-2xl bg-slate-900 p-5 text-center text-white">
-                  <p className="font-semibold">Policy confirmed for Wallet {parsedPolicy.walletId}.</p>
-                  <p className="mt-1 text-sm text-slate-300">The shopping agent can now use these controls.</p>
+                  <p className="font-semibold">
+                    Policy confirmed for Wallet {walletId}.
+                  </p>
+                  <p className="mt-1 text-sm text-slate-300">
+                    The control layer is active for your shopping agent.
+                  </p>
                 </div>
               )}
+
               {error && <ErrorMessage message={error} />}
-              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
-                <button type="button" onClick={goBack} className="flex items-center justify-center gap-2 rounded-xl px-5 py-3.5 font-semibold text-slate-600 hover:bg-slate-200/60">
-                  <ArrowLeft size={18} /> Edit policy
+
+              {/* Footer Actions */}
+              <div className="flex justify-between">
+                <button
+                  type="button"
+                  onClick={() => setStep("describe")}
+                  className="flex items-center gap-2 rounded-xl px-4 py-3 font-semibold text-slate-600 hover:bg-slate-200"
+                >
+                  <ArrowLeft size={18} /> Edit prompt
                 </button>
                 {!isConfirmed && (
-                  <button type="submit" className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3.5 font-semibold text-white transition hover:bg-emerald-700">
-                    Confirm policy <Check size={18} />
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-3.5 font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
+                  >
+                    {isSubmitting ? "Confirming..." : "Confirm policy"}{" "}
+                    <Check size={18} />
                   </button>
                 )}
               </div>
@@ -291,18 +493,84 @@ export default function WalletPage() {
   );
 }
 
-function SummaryItem({ label, value }: { label: string; value: string }) {
+function SectionBlock({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="rounded-2xl bg-slate-50 p-4">
-      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="break-words font-medium text-slate-900">{value}</p>
+    <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h3 className="mb-4 text-base font-bold text-slate-900">{title}</h3>
+      <div className="flex flex-col gap-4">{children}</div>
     </div>
+  );
+}
+
+function InputField({
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder = "",
+}: {
+  label: string;
+  value: any;
+  onChange: (val: string) => void;
+  type?: string;
+  placeholder?: string;
+}) {
+  return (
+    <label className="block text-sm font-semibold text-slate-700">
+      {label}
+      <input
+        type={type}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-2.5 font-normal outline-none focus:border-emerald-500"
+      />
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: { label: string; value: string }[];
+  onChange: (val: string) => void;
+}) {
+  return (
+    <label className="block text-sm font-semibold text-slate-700">
+      {label}
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 font-normal outline-none focus:border-emerald-500"
+      >
+        <option value="">Don't care</option>
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
 function ErrorMessage({ message }: { message: string }) {
   return (
-    <p role="alert" className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    <p
+      role="alert"
+      className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+    >
       <AlertCircle size={17} /> {message}
     </p>
   );
