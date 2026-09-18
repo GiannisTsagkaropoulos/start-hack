@@ -36,8 +36,8 @@ export default function NavBar() {
         <Link href="#faq" className="hover:underline">
           FAQ
         </Link>
-        <Link href="/login" className="hover:underline">
-          Login
+        <Link href="/wallet" className="hover:underline">
+          Wallet
         </Link>
       </div>
     </nav>

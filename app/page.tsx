@@ -31,10 +31,10 @@ export default function LandingPage() {
         </p>
         <div className="flex flex-col sm:flex-row justify-center gap-4">
           <Link
-            href="/register"
+            href="/wallet"
             className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-4 px-8 rounded-xl flex items-center justify-center gap-2 transition-all transform hover:scale-105"
           >
-            Start Free Trial <ArrowRight size={20} />
+            Configure a wallet <ArrowRight size={20} />
           </Link>
         </div>
 
