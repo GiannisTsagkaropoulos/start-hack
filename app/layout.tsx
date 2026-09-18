@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import ScrollToTop from "@components/ScrollToTop";
+import KeyModal from "@/components/demo-screen/KeyModal";
+// import NavBar from "@components/NavBar";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -23,7 +26,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      {/* <NavBar/> */}
+      <body className="min-h-full flex flex-col">
+        {children}
+        <ScrollToTop />
+        <KeyModal />
+      </body>
     </html>
   );
 }
