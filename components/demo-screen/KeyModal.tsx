@@ -50,8 +50,8 @@ export default function KeyModal() {
     <>
       {/* Floating Desktop Hint */}
       <div className="hidden md:flex fixed bottom-6 right-6 z-40">
-        <div className="bg-sand-900/90 backdrop-blur-sm border border-slate-800 text-slate-700 text-md py-3 px-4 rounded-sm shadow-lg flex items-center gap-2">
-          Press <kbd className="border-slate-800 text-emerald-400 px-2 py-0.5 rounded font-mono text-xs border border-slate-700">{KEY_TO_PRESS}</kbd> to learn about {LEARN_WORD}
+        <div className="bg-sand-900/90 backdrop-blur-sm border border-border-hairline text-ink-0 text-md py-3 px-4 rounded-sm shadow-lg flex items-center gap-2">
+          Press <kbd className="border-border-hairline text-authority-strong px-2 py-0.5 rounded font-mono text-xs border border-border-hairline">{KEY_TO_PRESS}</kbd> to learn about {LEARN_WORD}
         </div>
       </div>
 
@@ -60,7 +60,7 @@ export default function KeyModal() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-base/60 backdrop-blur-sm transition-opacity">
           <div 
             ref={modalRef}
-            className="relative w-full max-w-lg bg-slate-700 border border-slate-800 rounded-xl shadow-2xl p-6 md:p-8 animate-in fade-in zoom-in duration-200"
+            className="relative w-full max-w-lg bg-surface-2 border border-border-hairline rounded-xl shadow-2xl p-6 md:p-8 animate-in fade-in zoom-in duration-200"
             role="dialog"
             aria-modal="true"
           >
@@ -77,7 +77,7 @@ export default function KeyModal() {
               What is a {LEARN_WORD}?
             </h2>
             
-            <div className="space-y-4 text-slate-100 leading-relaxed text-sm md:text-base">
+            <div className="space-y-4 text-ink-0 leading-relaxed text-sm md:text-base">
               <p>
                 A {LEARN_WORD}  (or chargeback) occurs when your customer tells their bank they didn't make/authorize the payment on your site.
               </p>

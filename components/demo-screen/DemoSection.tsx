@@ -26,18 +26,18 @@ const CASES = [
 ];
 
 const COLOR_MAP: Record<string, string> = {
-  emerald: "border-emerald-500/40 bg-emerald-500/5 text-emerald-600",
-  red: "border-red-500/40 bg-red-500/5 text-red-600",
-  amber: "border-amber-500/40 bg-amber-500/5 text-amber-600",
+  emerald: "border-authority/40 bg-authority-dim text-authority-strong",
+  red: "border-decline/40 bg-decline-dim text-decline",
+  amber: "border-review/40 bg-review-dim text-review",
 };
 
 export default function DemoSection() {
   return (
     <section className="max-w-5xl mx-auto px-4 py-20">
-      <p className="text-emerald-400 font-medium mb-3 text-center">
+      <p className="text-authority-strong font-medium mb-3 text-center">
         Three real purchases, three different outcomes
       </p>
-      <h2 className="text-3xl md:text-4xl font-extrabold text-slate-700 tracking-tight text-center mb-12">
+      <h2 className="text-3xl md:text-4xl font-extrabold text-ink-0 tracking-tight text-center mb-12">
         The same wallet policy, tested against the sponsor's own data
       </h2>
       <div className="grid md:grid-cols-3 gap-6">
@@ -47,22 +47,22 @@ export default function DemoSection() {
             className={`rounded-2xl border p-6 ${COLOR_MAP[c.color]}`}
           >
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-mono uppercase tracking-wider text-slate-400">
+              <span className="text-xs font-mono uppercase tracking-wider text-ink-3">
                 {c.id}
               </span>
-              <span className="text-sm font-semibold text-slate-500">
+              <span className="text-sm font-semibold text-ink-2">
                 {c.amount}
               </span>
             </div>
             <p className="text-lg font-bold mb-2">{c.verdict}</p>
-            <p className="text-sm font-semibold text-slate-600 mb-2">
+            <p className="text-sm font-semibold text-ink-1 mb-2">
               {c.label}
             </p>
-            <p className="text-sm text-slate-500 leading-relaxed">{c.note}</p>
+            <p className="text-sm text-ink-2 leading-relaxed">{c.note}</p>
           </div>
         ))}
       </div>
-      <p className="text-center text-xs text-slate-400 mt-8">
+      <p className="text-center text-xs text-ink-3 mt-8">
         Purchase IDs are from the official Viseca sponsor dataset — not
         scripted for the demo.
       </p>

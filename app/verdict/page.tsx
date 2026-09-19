@@ -170,7 +170,7 @@ export default function VerdictPage() {
 
         <div className={`mt-6 space-y-2 transition-[filter,opacity] duration-500 ${pendingHuman.length > 0 ? "opacity-70 blur-[1px]" : ""}`}>
           <AnimatePresence initial={false}>
-            {settled.slice(0, 8).map((result) => (
+            {settled.map((result) => (
               <TransactionMoment
                 key={result.authorization_id}
                 result={result}
@@ -359,11 +359,32 @@ function ActivityLedger({ job }: { job: ScenarioJobResponse }) {
         <Stat label="Awaiting you" value={job.summary.awaiting_customer} tone="text-review" />
       </div>
       {job.scenarios.map((scenario) => (
-        <div key={scenario.scenario_id} className="rounded-xl border border-border-hairline bg-white/[0.02] p-4">
-          <div className="flex items-center justify-between">
-            <p className="font-mono text-[11px] uppercase tracking-wide text-ink-3">{scenario.scenario_id} · {scenario.scenario_name}</p>
-            <p className="text-[11px] text-ink-3">{scenario.results.length}/{scenario.event_count}</p>
+        <div key={scenario.scenario_id} className="overflow-hidden rounded-xl border border-border-hairline bg-white/[0.02]">
+          <div className="flex items-center justify-between border-b border-border-hairline px-4 py-3">
+            <p className="font-mono text-[11px] uppercase tracking-wide text-ink-2">{scenario.scenario_id} · {scenario.scenario_name}</p>
+            <p className="text-[11px] tabular-nums text-ink-2">{scenario.results.length}/{scenario.event_count}</p>
           </div>
+          {scenario.results.length === 0 ? (
+            <p className="px-4 py-3 text-[12px] text-ink-3">No authorizations yet.</p>
+          ) : (
+            scenario.results
+              .toSorted((a, b) => (a.purchase.replay_order ?? 0) - (b.purchase.replay_order ?? 0))
+              .map((r) => {
+                const d = r.final_decision ?? r.engine_decision;
+                const tone = d === "approve" ? "text-authority-strong" : d === "decline" ? "text-decline" : "text-review";
+                return (
+                  <div key={r.authorization_id} className="flex items-center gap-3 border-b border-border-hairline/60 px-4 py-2.5 last:border-b-0">
+                    <span className="w-7 shrink-0 font-mono text-[10.5px] text-ink-3">#{r.purchase.replay_order ?? "–"}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[12.5px] text-ink-0">{r.purchase.merchant_name || "Unknown merchant"}</p>
+                      <p className="truncate text-[11px] text-ink-3">{r.purchase.description || r.source_authorization_id || r.authorization_id}</p>
+                    </div>
+                    <span className="shrink-0 font-mono text-[12.5px] tabular-nums text-ink-0">{formatMoney(r.purchase.amount, r.purchase.currency)}</span>
+                    <span className={`w-16 shrink-0 text-right text-[10.5px] font-semibold uppercase tracking-wide ${tone}`}>{d}</span>
+                  </div>
+                );
+              })
+          )}
         </div>
       ))}
     </div>

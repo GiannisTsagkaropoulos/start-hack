@@ -31,32 +31,32 @@ export default function FAQ() {
   return (
     <section
       id="faq"
-      className="max-w-6xl mx-auto px-4 py-24 border-t border-slate-800"
+      className="max-w-6xl mx-auto px-4 py-24 border-t border-border-hairline"
     >
       <div className="grid md:grid-cols-12 gap-12 items-start">
         <div className="md:col-span-5 md:sticky md:top-24">
-          <span className="text-emerald-400 font-bold uppercase tracking-wider text-sm mb-3 block">
+          <span className="text-authority-strong font-bold uppercase tracking-wider text-sm mb-3 block">
             FAQ
           </span>
-          <h2 className="text-4xl md:text-5xl font-extrabold text-slate-800 tracking-tight leading-tight">
+          <h2 className="text-4xl md:text-5xl font-extrabold text-ink-0 tracking-tight leading-tight">
             Frequently Asked Questions
           </h2>
         </div>
 
-        <div className="md:col-span-7 divide-y divide-slate-800 border-t border-b border-slate-800">
+        <div className="md:col-span-7 divide-y divide-slate-800 border-t border-b border-border-hairline">
           {faqs.map((faq, i) => (
             <details
               key={i}
               className="group py-6 [&_summary::-webkit-details-marker]:hidden"
             >
-              <summary className="flex cursor-pointer items-center justify-between font-semibold text-lg text-slate-800 list-none group-open:text-emerald-400 hover:text-slate-500 transition-colors">
+              <summary className="flex cursor-pointer items-center justify-between font-semibold text-lg text-ink-0 list-none group-open:text-authority-strong hover:text-ink-2 transition-colors">
                 <span>{faq.q}</span>
-                <span className="text-slate-400 group-open:text-emerald-400 shrink-0 ml-4">
+                <span className="text-ink-3 group-open:text-authority-strong shrink-0 ml-4">
                   <Plus size={20} className="block group-open:hidden" />
                   <Minus size={20} className="hidden group-open:block" />
                 </span>
               </summary>
-              <div className="mt-4 text-slate-400 leading-relaxed pr-8 text-sm md:text-base">
+              <div className="mt-4 text-ink-3 leading-relaxed pr-8 text-sm md:text-base">
                 {faq.a}
               </div>
             </details>

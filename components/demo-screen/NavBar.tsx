@@ -19,8 +19,8 @@ export default function NavBar() {
   const COMPANY_NAME = "Leash";
 
   return (
-    <nav className="sticky z-100 bg-gray-50 top-0 flex justify-between items-center p-6 max-w-6xl mx-auto text-l font-semibold">
-      <div className="flex items-center gap-2 font-bold text-xl text-slate-700">
+    <nav className="sticky z-100 bg-void top-0 flex justify-between items-center p-6 max-w-6xl mx-auto text-l font-semibold">
+      <div className="flex items-center gap-2 font-bold text-xl text-ink-0">
         <button
           onClick={scrollToTop}
           aria-label="Scroll to top"
