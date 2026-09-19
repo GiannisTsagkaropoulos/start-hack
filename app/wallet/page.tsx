@@ -29,27 +29,17 @@ function toWalletPolicy(draft: ParsedPolicyDraft): WalletPolicy {
     },
     spending: {
       per_item_purchase_price_max: draft.spending.per_item_purchase_price_max as number,
-      per_period_purchase_price_max: draft.spending.per_period_purchase_price_max,
+      per_period_purchase_price_max: draft.spending.per_period_purchase_price_max as number,
       currency: draft.spending.currency as WalletPolicy["spending"]["currency"],
-      period_in_days: draft.spending.period_in_days,
+      period_in_days: draft.spending.period_in_days as number,
     },
     merchant: {
       blocklist: draft.merchant.blocklist ?? [],
       allowlist: draft.merchant.allowlist ?? [],
     },
     order_terms: {
-      require_returnable: draft.order_terms.require_returnable,
-      require_cancellable: draft.order_terms.require_cancellable,
-    },
-    session: {
-      max_recent_attempts_10m: draft.session.max_recent_attempts_10m,
-      trusted_devices_only: draft.session.trusted_devices_only as boolean,
-      domestic_only: draft.session.domestic_only,
-    },
-    // Was previously hardcoded to null here, silently dropping whatever the
-    // parser found or the customer entered on review.
-    duplicate_check: {
-      block_repeats_within_minutes: draft.duplicate_check?.block_repeats_within_minutes ?? null,
+      require_returnable: draft.order_terms.require_returnable ?? true,
+      require_cancellable: draft.order_terms.require_cancellable ?? true,
     },
     notes_for_customer: draft.notes_for_customer ?? "",
   };
@@ -82,10 +72,9 @@ const PRODUCT_CATEGORIES: { label: string; value: ProductCategory }[] = [
 const requiredConfirmationFields = [
   "products.allowed_categories",
   "spending.per_item_purchase_price_max",
+  "spending.per_period_purchase_price_max",
   "spending.currency",
-  "order_terms.require_returnable",
-  "session.trusted_devices_only",
-  "session.domestic_only",
+  "spending.period_in_days",
 ] as const;
 
 const DEFAULT_POLICY: ParsedPolicyDraft = {
@@ -104,16 +93,8 @@ const DEFAULT_POLICY: ParsedPolicyDraft = {
     allowlist: [],
   },
   order_terms: {
-    require_returnable: null,
-    require_cancellable: null,
-  },
-  session: {
-    max_recent_attempts_10m: null,
-    trusted_devices_only: true,
-    domestic_only: null,
-  },
-  duplicate_check: {
-    block_repeats_within_minutes: null,
+    require_returnable: true,
+    require_cancellable: true,
   },
   notes_for_customer: "",
 };
@@ -417,6 +398,7 @@ export default function WalletPage() {
                         val ? parseFloat(val) : null,
                       )
                     }
+                    required
                     needsAttention={isUnknown("spending.per_period_purchase_price_max")}
                   />
 
@@ -431,6 +413,7 @@ export default function WalletPage() {
                         val ? parseInt(val) : null,
                       )
                     }
+                    required
                     needsAttention={isUnknown("spending.period_in_days")}
                   />
                 </SectionBlock>
@@ -438,7 +421,6 @@ export default function WalletPage() {
                 {/* 4. Order Terms */}
                 <SectionBlock
                   title="4. Order Terms"
-                  needsAttention={isUnknown("order_terms.require_returnable")}
                 >
                   <SelectField
                     label="Require Returnable"
@@ -458,7 +440,6 @@ export default function WalletPage() {
                       )
                     }
                     required
-                    needsAttention={isUnknown("order_terms.require_returnable")}
                   />
                   <SelectField
                     label="Require Cancellable"
@@ -477,73 +458,7 @@ export default function WalletPage() {
                         val === "" ? null : val === "true",
                       )
                     }
-                  />
-                </SectionBlock>
-
-                {/* 5. Session */}
-                <SectionBlock
-                  title="5. Session Restrictions"
-                  needsAttention={[
-                    "session.trusted_devices_only",
-                    "session.domestic_only",
-                  ].some(isUnknown)}
-                >
-                  <SelectField
-                    label="Trusted Devices Only"
-                    value={
-                      draftPolicy.session?.trusted_devices_only === null
-                        ? ""
-                        : String(draftPolicy.session?.trusted_devices_only)
-                    }
-                    options={[
-                      { label: "Yes", value: "true" },
-                      { label: "No", value: "false" },
-                    ]}
-                    onChange={(val) =>
-                      updatePolicyValue(
-                        "session.trusted_devices_only",
-                        val === "" ? null : val === "true",
-                      )
-                    }
                     required
-                    needsAttention={isUnknown("session.trusted_devices_only")}
-                  />
-                  <SelectField
-                    label="Domestic Purchases Only"
-                    value={
-                      draftPolicy.session?.domestic_only === null
-                        ? ""
-                        : String(draftPolicy.session?.domestic_only)
-                    }
-                    options={[
-                      { label: "Yes", value: "true" },
-                      { label: "No", value: "false" },
-                    ]}
-                    onChange={(val) =>
-                      updatePolicyValue(
-                        "session.domestic_only",
-                        val === "" ? null : val === "true",
-                      )
-                    }
-                    required
-                    needsAttention={isUnknown("session.domestic_only")}
-                  />
-                </SectionBlock>
-
-                {/* 6. Duplicate Purchase Check - optional, but preserved from the
-                    parsed draft instead of silently discarded on confirm. */}
-                <SectionBlock title="6. Duplicate Purchase Check">
-                  <InputField
-                    label="Block repeat purchases within (minutes)"
-                    type="number"
-                    value={draftPolicy.duplicate_check?.block_repeats_within_minutes ?? ""}
-                    placeholder="No limit"
-                    onChange={(val) =>
-                      updatePolicyValue(
-                        "duplicate_check.block_repeats_within_minutes",
-                        val ? parseInt(val) : null,
-                      )
-                    }
                   />
                 </SectionBlock>
               </div>
@@ -717,7 +632,7 @@ function SelectField({
           needsAttention ? "border-amber-300 bg-amber-50" : "border-slate-300 bg-white"
         }`}
       >
-        <option value="">{required ? "Select an option" : "Don&apos;t care"}</option>
+        <option value="">{required ? "Select an option" : "Don't care"}</option>
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
             {opt.label}

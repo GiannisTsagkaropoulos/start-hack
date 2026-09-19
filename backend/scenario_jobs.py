@@ -88,11 +88,6 @@ def policy_to_hard_rules(policy: dict[str, Any]) -> list[dict[str, Any]]:
     if order_terms.get("require_cancellable"):
         rules.append({"field": "authorization.order_cancellable", "operator": "=", "value": "true", "scope": "purchase"})
 
-    max_attempts = policy.get("session", {}).get("max_recent_attempts_10m")
-    if max_attempts is not None:
-        # The event contains the number of earlier attempts. Using '< max'
-        # means the current attempt remains within a total-attempt cap of max.
-        rules.append({"field": "authorization.recent_attempt_count_10m", "operator": "<", "value": max_attempts, "scope": "purchase"})
     return rules
 
 

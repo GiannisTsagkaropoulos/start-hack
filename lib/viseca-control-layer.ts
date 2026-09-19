@@ -54,14 +54,6 @@ export interface ParsedPolicyDraft {
     require_returnable: boolean | null;
     require_cancellable: boolean | null;
   };
-  session: {
-    max_recent_attempts_10m: number | null;
-    trusted_devices_only: boolean | null;
-    domestic_only: boolean | null;
-  };
-  duplicate_check: {
-    block_repeats_within_minutes: number | null;
-  };
   notes_for_customer: string | null;
 }
 
@@ -89,25 +81,17 @@ export interface WalletPolicy {
   };
   spending: {
     per_item_purchase_price_max: number;
-    per_period_purchase_price_max: number | null;
+    per_period_purchase_price_max: number;
     currency: Currency;
-    period_in_days: number | null;
+    period_in_days: number;
   };
   merchant: {
     blocklist: string[];
     allowlist: string[];
   };
   order_terms: {
-    require_returnable: boolean | null;
-    require_cancellable: boolean | null;
-  };
-  session: {
-    max_recent_attempts_10m: number | null;
-    trusted_devices_only: boolean;
-    domestic_only: boolean | null;
-  };
-  duplicate_check: {
-    block_repeats_within_minutes: number | null;
+    require_returnable: boolean;
+    require_cancellable: boolean;
   };
   notes_for_customer: string;
 }

@@ -93,8 +93,14 @@ class FakeLeashClient:
 POLICY = {
     "raw_instructions": "Allow purchases up to CHF 100.",
     "products": {"allowed_categories": ["groceries"]},
-    "spending": {"per_item_purchase_price_max": 100, "currency": "CHF"},
+    "spending": {
+        "per_item_purchase_price_max": 100,
+        "per_period_purchase_price_max": 500,
+        "currency": "CHF",
+        "period_in_days": 30,
+    },
     "merchant": {"blocklist": [], "allowlist": []},
+    "order_terms": {"require_returnable": True, "require_cancellable": True},
 }
 
 
@@ -112,7 +118,19 @@ def test_policy_to_hard_rules():
             "value": 100,
             "currency": "CHF",
             "scope": "purchase",
-        }
+        },
+        {
+            "field": "authorization.order_returnable",
+            "operator": "=",
+            "value": "true",
+            "scope": "purchase",
+        },
+        {
+            "field": "authorization.order_cancellable",
+            "operator": "=",
+            "value": "true",
+            "scope": "purchase",
+        },
     ]
 
 
@@ -124,8 +142,6 @@ def test_policy_to_all_event_local_rules():
             "blocklist": ["Blocked Shop"],
             "allowlist": ["Alpine Basket"],
         },
-        "order_terms": {"require_returnable": True, "require_cancellable": True},
-        "session": {"max_recent_attempts_10m": 3},
     }
     assert policy_to_hard_rules(policy)[2:] == [
         {
@@ -150,12 +166,6 @@ def test_policy_to_all_event_local_rules():
             "field": "authorization.order_cancellable",
             "operator": "=",
             "value": "true",
-            "scope": "purchase",
-        },
-        {
-            "field": "authorization.recent_attempt_count_10m",
-            "operator": "<",
-            "value": 3,
             "scope": "purchase",
         },
     ]

@@ -8,7 +8,11 @@ The team API key remains in the FastAPI process and is never sent to the browser
 `POST /parse-policy` converts the customer's text into the editable local
 `ParsedPolicyDraft`. The LLM must derive at least one
 `products.allowed_categories` value from the requested product. The customer
-reviews that allowlist before confirmation. This draft is not a Leash mandate.
+reviews that allowlist before confirmation. All four spending fields are
+mandatory; unidentified values must be supplied in the review form.
+Returnability and cancellability default to `true` when the instruction omits
+them. Session restrictions and duplicate-purchase configuration are not part of
+the current policy contract. This draft is not a Leash mandate.
 
 ## Production scenario workflow
 
@@ -38,8 +42,8 @@ The deterministic classifier first enforces the confirmed product-category
 allowlist against every cart line. A missing or mismatching category immediately
 declines the authorization without evaluating later rules. It then enforces
 event-local checks for per-item price (when the item currency matches the policy), merchant allow/block lists,
-returnability, subscription cancellability, ten-minute attempt velocity,
-authority status, card status, and initiator type. Cancellability is skipped
+returnability, subscription cancellability, authority status, card status, and
+initiator type. Cancellability is skipped
 for every non-subscription product, even if its event uses the literal
 `"unknown"` rather than omitting the field.
 
@@ -49,6 +53,5 @@ user and card. Fewer than three transactions, or unavailable history, produces
 evidence for other checks or a required currency conversion also produces
 `step_up`; a known hard-rule violation produces `decline`.
 
-Period spend, trusted-device history, domestic-country resolution, duplicate
-detection, and cross-currency item prices require state or reference-data
+Period spend and cross-currency item prices require state or reference-data
 lookups and are not yet published as enforced Leash rules.

@@ -40,9 +40,9 @@ ProductCategory = Literal[
 # --- Strict Schemas (For Final Confirmation) ---
 class Spending(BaseModel):
     per_item_purchase_price_max: float = Field(gt=0)
-    per_period_purchase_price_max: float | None = Field(default=None, gt=0)
+    per_period_purchase_price_max: float = Field(gt=0)
     currency: Currency
-    period_in_days: int | None = Field(default=None, gt=0)
+    period_in_days: int = Field(gt=0)
 
 
 class Products(BaseModel):
@@ -55,18 +55,8 @@ class Merchant(BaseModel):
 
 
 class OrderTerms(BaseModel):
-    require_returnable: bool | None = None
-    require_cancellable: bool | None = None
-
-
-class Session(BaseModel):
-    max_recent_attempts_10m: int | None = Field(default=None, ge=0)
-    trusted_devices_only: bool = True
-    domestic_only: bool | None = None
-
-
-class DuplicateCheck(BaseModel):
-    block_repeats_within_minutes: int | None = Field(default=None, ge=0)
+    require_returnable: bool = True
+    require_cancellable: bool = True
 
 
 class Schema(BaseModel):
@@ -75,8 +65,6 @@ class Schema(BaseModel):
     spending: Spending
     merchant: Merchant
     order_terms: OrderTerms
-    session: Session
-    duplicate_check: DuplicateCheck
     notes_for_customer: str = ""
 
 
@@ -102,24 +90,12 @@ class DraftOrderTerms(BaseModel):
     require_cancellable: bool | None = None
 
 
-class DraftSession(BaseModel):
-    max_recent_attempts_10m: int | None = None
-    trusted_devices_only: bool | None = None
-    domestic_only: bool | None = None
-
-
-class DraftDuplicateCheck(BaseModel):
-    block_repeats_within_minutes: int | None = None
-
-
 class DraftSchema(BaseModel):
     raw_instructions: str
     products: DraftProducts
     spending: DraftSpending
     merchant: DraftMerchant
     order_terms: DraftOrderTerms
-    session: DraftSession
-    duplicate_check: DraftDuplicateCheck
     notes_for_customer: str | None = ""
 
 
@@ -204,7 +180,9 @@ def parse_with_llm(text: str) -> DraftSchema:
     prompt = f"""
     You are an AI assistant configuring a secure wallet policy for an AI shopping agent.
     Extract the rules, limits, and preferences from the user's natural language input.
-    If a value is not mentioned or cannot be confidently inferred, output null for it.
+    If a spending value is not mentioned or cannot be confidently inferred,
+    output null for it so the customer must provide it. If returnability or
+    cancellability is not mentioned, default it to true.
 
     User Input: "{text}"
 
@@ -228,25 +206,17 @@ def parse_with_llm(text: str) -> DraftSchema:
 
     class Spending(BaseModel):
     per_item_purchase_price_max: float = Field(gt=0)
-    per_period_purchase_price_max: float | None = Field(default=None, gt=0)
+    per_period_purchase_price_max: float = Field(gt=0)
     currency: Currency
-    period_in_days: int | None = Field(default=None, gt=0)
+    period_in_days: int = Field(gt=0)
 
 class Merchant(BaseModel):
     blocklist: list[str] = Field(default_factory=list)
     allowlist: list[str] = Field(default_factory=list)
 
 class OrderTerms(BaseModel):
-    require_returnable: bool | None
-    require_cancellable: bool | None
-
-class Session(BaseModel):
-    max_recent_attempts_10m: int | None = Field(default=None, ge=0)
-    trusted_devices_only: bool
-    domestic_only: bool | None
-
-class DuplicateCheck(BaseModel):
-    block_repeats_within_minutes: int | None = Field(default=None, ge=0)
+    require_returnable: bool = True
+    require_cancellable: bool = True
 
 class FinalSchema(BaseModel):
     raw_instructions: str = Field(min_length=1)
@@ -254,8 +224,6 @@ class FinalSchema(BaseModel):
     spending: Spending
     merchant: Merchant
     order_terms: OrderTerms
-    session: Session
-    duplicate_check: DuplicateCheck
     notes_for_customer: str = ""
     """
     
@@ -288,24 +256,6 @@ def check_missing_fields(draft: dict[str, Any]) -> list[str]:
     if spending.get("period_in_days") is None:
         missing.append("spending.period_in_days")
 
-    # Order Terms
-    order_terms = draft.get("order_terms", {})
-    if order_terms.get("require_returnable") is None:
-        missing.append("order_terms.require_returnable")
-    # Session
-    session = draft.get("session", {})
-    if session.get("trusted_devices_only") is None:
-        missing.append("session.trusted_devices_only")
-    if session.get("domestic_only") is None:
-        missing.append("session.domestic_only")
-    if session.get("max_recent_attempts_10m") is None:
-        missing.append("session.max_recent_attempts_10m")
-
-    # Duplicate Check
-    duplicate_check = draft.get("duplicate_check", {})
-    if duplicate_check.get("block_repeats_within_minutes") is None:
-        missing.append("duplicate_check.block_repeats_within_minutes")
-
     return missing
 
 
@@ -319,6 +269,11 @@ def parse_policy(request: PolicyRequest) -> PolicyResponse:
     parsed_draft = parse_with_llm(combined_text)
     
     draft_dict = parsed_draft.model_dump()
+    order_terms = draft_dict.setdefault("order_terms", {})
+    if order_terms.get("require_returnable") is None:
+        order_terms["require_returnable"] = True
+    if order_terms.get("require_cancellable") is None:
+        order_terms["require_cancellable"] = True
 
     # PRINT TO TERMINAL
     print("\n=================== LLM PARSED OUTPUT ===================")
