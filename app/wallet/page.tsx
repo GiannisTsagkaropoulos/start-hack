@@ -15,6 +15,7 @@ import {
 import {
   ParsePolicyResponse,
   ParsedPolicyDraft,
+  ScenarioJobResponse,
   VERDICT_STORAGE_KEY,
   WalletPolicy,
   readErrorMessage,
@@ -53,7 +54,7 @@ function toWalletPolicy(draft: ParsedPolicyDraft): WalletPolicy {
   };
 }
 
-type Step = "select" | "describe" | "review";
+type Step = "select" | "describe" | "review" | "confirm";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -102,12 +103,13 @@ export default function WalletPage() {
   const [walletId, setWalletId] = useState("");
   const [policyText, setPolicyText] = useState("");
   const [draftPolicy, setDraftPolicy] = useState<ParsedPolicyDraft>(DEFAULT_POLICY);
+  const [preparedJob, setPreparedJob] = useState<ScenarioJobResponse | null>(null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
   const progress = useMemo(
-    () => ({ select: 1, describe: 2, review: 3 })[step],
+    () => ({ select: 1, describe: 2, review: 3, confirm: 4 })[step],
     [step],
   );
 
@@ -175,7 +177,7 @@ export default function WalletPage() {
     }
   };
 
-  const confirmPolicy = async (e: FormEvent<HTMLFormElement>) => {
+  const prepareMandate = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (missingRequiredFields.length > 0) {
       setError("Please answer every yellow required field before confirming the policy.");
@@ -188,7 +190,7 @@ export default function WalletPage() {
     try {
       const policy = toWalletPolicy(draftPolicy);
 
-      const confirmRes = await fetch(`${API_URL}/confirm-policy`, {
+      const prepareRes = await fetch(`${API_URL}/leash/mandates/prepare`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -197,30 +199,43 @@ export default function WalletPage() {
         }),
       });
 
-      if (!confirmRes.ok) {
-        throw new Error(await readErrorMessage(confirmRes, "The policy could not be confirmed."));
+      if (!prepareRes.ok) {
+        throw new Error(await readErrorMessage(prepareRes, "The Leash mandate draft could not be created."));
       }
 
-      const decisionRes = await fetch(`${API_URL}/decision`, {
+      const job = (await prepareRes.json()) as ScenarioJobResponse;
+      setPreparedJob(job);
+      setStep("confirm");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Mandate preparation failed.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const confirmAndRun = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!preparedJob) return;
+
+    setIsSubmitting(true);
+    setError("");
+    try {
+      const response = await fetch(`${API_URL}/leash/jobs/${preparedJob.job_id}/confirm`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          wallet_id: Number(walletId),
-          policy,
-        }),
       });
 
-      if (!decisionRes.ok) {
+      if (!response.ok) {
         throw new Error(
-          await readErrorMessage(decisionRes, "Could not classify a purchase against this policy."),
+          await readErrorMessage(response, "The mandate could not be confirmed or started."),
         );
       }
 
-      const verdict = await decisionRes.json();
-      sessionStorage.setItem(VERDICT_STORAGE_KEY, JSON.stringify(verdict));
+      const job = (await response.json()) as ScenarioJobResponse;
+      sessionStorage.setItem(VERDICT_STORAGE_KEY, JSON.stringify({ job_id: job.job_id }));
       router.push("/verdict");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Confirmation failed.");
+      setError(err instanceof Error ? err.message : "Could not start the scenario run.");
     } finally {
       setIsSubmitting(false);
     }
@@ -246,12 +261,13 @@ export default function WalletPage() {
           <div className="mb-8 flex items-center justify-between">
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">
-                Step {progress} of 3
+                Step {progress} of 4
               </p>
               <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
                 {step === "select" && "Choose a wallet"}
                 {step === "describe" && "Describe your shopping rules"}
                 {step === "review" && "Review your wallet policy"}
+                {step === "confirm" && "Confirm the Leash mandate"}
               </h1>
             </div>
           </div>
@@ -325,7 +341,7 @@ export default function WalletPage() {
           )}
 
           {step === "review" && (
-            <form onSubmit={confirmPolicy} className="space-y-8">
+            <form onSubmit={prepareMandate} className="space-y-8">
               {/* Header Status */}
               <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="flex items-start justify-between">
@@ -590,8 +606,66 @@ export default function WalletPage() {
                   disabled={isSubmitting}
                   className="flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-3.5 font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
                 >
-                  {isSubmitting ? "Confirming..." : "Confirm policy"}{" "}
+                  {isSubmitting ? "Creating draft..." : "Create mandate draft"}{" "}
                   <Check size={18} />
+                </button>
+              </div>
+            </form>
+          )}
+
+          {step === "confirm" && preparedJob && (
+            <form onSubmit={confirmAndRun} className="space-y-6">
+              <div className="rounded-3xl border border-emerald-200 bg-white p-6 shadow-sm">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">
+                      Leash draft {preparedJob.draft.draft_id}
+                    </p>
+                    <h2 className="mt-2 text-xl font-semibold">Review before activation</h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-500">
+                      The service is healthy, bootstrap and reference data were loaded, and this
+                      draft has not been activated yet. Confirming starts all five scenarios.
+                    </p>
+                  </div>
+                  <CheckCircle2 className="shrink-0 text-emerald-500" size={28} />
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h3 className="font-bold">Instruction</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-700">{preparedJob.draft.instruction}</p>
+                <h3 className="mt-6 font-bold">Compiled checks</h3>
+                <div className="mt-3 space-y-3">
+                  {preparedJob.draft.hard_rules.map((rule, index) => (
+                    <div key={`${rule.field}-${index}`} className="rounded-xl bg-slate-50 p-4 text-sm">
+                      <span className="font-semibold text-slate-900">{rule.field}</span>{" "}
+                      <span className="text-slate-600">{rule.operator} {String(rule.value)}</span>
+                      {rule.currency && <span className="text-slate-500"> {rule.currency}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {error && <ErrorMessage message={error} />}
+
+              <div className="flex justify-between gap-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreparedJob(null);
+                    setStep("review");
+                  }}
+                  className="flex items-center gap-2 rounded-xl px-4 py-3 font-semibold text-slate-600 hover:bg-slate-200"
+                >
+                  <ArrowLeft size={18} /> Edit policy
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-3.5 font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
+                >
+                  {isSubmitting ? "Starting scenarios..." : "Confirm and run all scenarios"}
+                  <ArrowRight size={18} />
                 </button>
               </div>
             </form>

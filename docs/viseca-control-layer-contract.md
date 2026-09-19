@@ -1,26 +1,39 @@
-# Viseca Control Layer HTTP contract
+# Wallet and Leash control-layer contract
 
-Source verified against `C:\Users\user\Desktop\start_hack\VisecaControlLayer\api.py` and its JSON schemas on 2026-09-19. The TypeScript representation is [lib/viseca-control-layer.ts](../lib/viseca-control-layer.ts).
+The wallet UI uses `NEXT_PUBLIC_API_URL`, defaulting to `http://localhost:8000`.
+The team API key remains in the FastAPI process and is never sent to the browser.
 
-## Base URL
+## Policy parsing
 
-The wallet UI uses `NEXT_PUBLIC_API_URL`, defaulting to `http://localhost:8000`. The control layer enables CORS for all origins.
+`POST /parse-policy` converts the customer's text into the editable local
+`ParsedPolicyDraft`. This is the review UI's input and is not a Leash mandate.
 
-## Endpoints
+## Production scenario workflow
 
-| Method | Path | Request | Successful response |
-| --- | --- | --- | --- |
-| POST | `/parse-policy` | `ParsePolicyRequest` | `ParsePolicyResponse` |
-| POST | `/confirm-policy` | `ConfirmPolicyRequest` | `ConfirmPolicyResponse` |
+The browser-facing endpoints below orchestrate the documented Leash calls:
 
-Both endpoints validate malformed request bodies with FastAPI's standard `422` response. `confirm-policy` also returns `422` when the provided v2 mandate fails semantic validation.
+| Local endpoint | Leash calls and behavior |
+| --- | --- |
+| `POST /leash/mandates/prepare` | `GET /healthz`, `GET /v1/bootstrap`, `GET /v1/reference-data`, then `POST /v1/mandates`. Returns the unconfirmed draft for customer review. |
+| `POST /leash/jobs/{job_id}/confirm` | `POST /v1/mandates/{draft_id}/confirm`, then starts the background scenario worker. |
+| `GET /leash/jobs/{job_id}` | Returns current status and every classification grouped by scenario. The verdict page polls this endpoint. |
+| `POST /leash/jobs/{job_id}/authorizations/{authorization_id}/resolve` | Sends a real customer approve/decline answer to `POST /v1/authorizations/{authorization_id}/resolve`. |
 
-## Important integration finding
+For each scenario returned by bootstrap, the worker calls
+`POST /v1/scenario-runs`, checks `GET /v1/scenario-runs/{run_id}`, long-polls
+`GET /v1/decision-requests/next?wait=25`, evaluates every delivered event, and
+submits `POST /v1/authorizations/{authorization_id}/decision` before the
+deadline. HTTP 204 means that the worker checks run progress and polls again.
 
-The current endpoints do **not** compose. `/parse-policy` returns the lightweight `ParsedPolicyDraft` shape, but `/confirm-policy` accepts the much richer `LocalMandateV2` shape. In particular, a parse result does not have `mandate_id`, `policy_version`, `cart`, `uncertainty_policy`, or `prompt_injection_defense`—all are mandatory for confirmation.
+`step_up` remains pending and visible on the verdict page while the worker keeps
+polling. Only a customer's explicit action invokes `/resolve`. Jobs are kept in
+FastAPI process memory for this demo; Leash is the authoritative persistent
+store, so restarting FastAPI requires starting a fresh UI job.
 
-The existing wallet page passed its parse result directly to confirmation; that request would be rejected with `422` by the current control layer. The wallet now uses the explicitly typed `toLocalMandateV2` adapter before confirmation, retaining the current draft-editor experience while producing the strict confirmation body.
+## Current classifier scope
 
-## Classification verdict
-
-`database/decision_engine.py` returns `DecisionResponse` from its classifier. It is not exposed by the current FastAPI adapter, so [the verdict page](../app/verdict/page.tsx) accepts the returned JSON for display. Its exact fields are `authorization_id`, `decision`, `reason_codes`, `evidence`, and `engine_version: "rule-classifier-v2"`.
+The existing deterministic classifier enforces the CHF per-purchase ceiling and
+the optional prior-merchant requirement. Only those supported checks are
+published as Leash hard rules. Other fields remain in the editable local policy
+but must not be presented as enforced production checks until the classifier is
+extended to evaluate them.
