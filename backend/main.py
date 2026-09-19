@@ -17,6 +17,24 @@ load_dotenv()
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 Currency = Literal["CHF", "USD", "EUR"]
+ProductCategory = Literal[
+    "books",
+    "clothing",
+    "cosmetics",
+    "dining",
+    "electronics",
+    "food_delivery",
+    "fuel",
+    "gift_card",
+    "groceries",
+    "home_improvement",
+    "hotel",
+    "household",
+    "membership",
+    "sporting_goods",
+    "subscriptions",
+    "transport",
+]
 
 
 # --- Strict Schemas (For Final Confirmation) ---
@@ -25,6 +43,10 @@ class Spending(BaseModel):
     per_period_purchase_price_max: float | None = Field(default=None, gt=0)
     currency: Currency
     period_in_days: int | None = Field(default=None, gt=0)
+
+
+class Products(BaseModel):
+    allowed_categories: list[ProductCategory] = Field(min_length=1)
 
 
 class Merchant(BaseModel):
@@ -51,6 +73,7 @@ class DuplicateCheck(BaseModel):
 
 class Schema(BaseModel):
     raw_instructions: str = Field(min_length=1)
+    products: Products
     spending: Spending
     merchant: Merchant
     order_terms: OrderTerms
@@ -65,6 +88,10 @@ class DraftSpending(BaseModel):
     per_period_purchase_price_max: float | None = None
     currency: Currency | None = None
     period_in_days: int | None = None
+
+
+class DraftProducts(BaseModel):
+    allowed_categories: list[ProductCategory] | None = None
 
 
 class DraftMerchant(BaseModel):
@@ -91,6 +118,7 @@ class DraftDuplicateCheck(BaseModel):
 
 class DraftSchema(BaseModel):
     raw_instructions: str
+    products: DraftProducts
     spending: DraftSpending
     merchant: DraftMerchant
     order_terms: DraftOrderTerms
@@ -184,7 +212,23 @@ def parse_with_llm(text: str) -> DraftSchema:
 
     User Input: "{text}"
 
+    Product category is the primary authorization rule. Derive one or more
+    allowed product categories from the requested product in the user's text.
+    Use only these exact values:
+    books, clothing, cosmetics, dining, electronics, food_delivery, fuel,
+    gift_card, groceries, home_improvement, hotel, household, membership,
+    sporting_goods, subscriptions, transport.
+
+    Examples: running shoes -> sporting_goods; groceries or food ingredients
+    -> groceries; restaurant meal -> dining; delivered prepared meal ->
+    food_delivery. Do not use a merchant category as a substitute for the
+    requested product category. If no product can be identified, output null
+    for products.allowed_categories so the customer must choose it.
+
     Output in JSON format a FinalSchema:
+
+    class Products(BaseModel):
+    allowed_categories: list[ProductCategory]
 
     class Spending(BaseModel):
     per_item_purchase_price_max: float = Field(gt=0)
@@ -212,6 +256,7 @@ class DuplicateCheck(BaseModel):
 
 class FinalSchema(BaseModel):
     raw_instructions: str = Field(min_length=1)
+    products: Products
     spending: Spending
     merchant: Merchant
     order_terms: OrderTerms
@@ -231,6 +276,12 @@ class FinalSchema(BaseModel):
 
 def check_missing_fields(draft: dict[str, Any]) -> list[str]:
     missing = []
+
+    # Product category is mandatory because it is the first authorization
+    # check and every cart line must match it.
+    products = draft.get("products", {})
+    if not products.get("allowed_categories"):
+        missing.append("products.allowed_categories")
 
     # Spending
     spending = draft.get("spending", {})

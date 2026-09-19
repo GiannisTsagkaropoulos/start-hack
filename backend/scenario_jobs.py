@@ -50,25 +50,27 @@ def _default_client_factory() -> LeashClient:
 def policy_to_hard_rules(policy: dict[str, Any]) -> list[dict[str, Any]]:
     """Translate the checks supported by the existing classifier to Leash rules.
 
-    The classifier currently enforces a CHF per-purchase ceiling and an optional
-    prior-merchant requirement.  Do not publish the remaining review fields as
-    hard rules until the classifier can actually enforce them.
+    Publish only rules that the classifier can enforce either from the current
+    authorization event or from the existing merchant-history lookup.
     """
     spending = policy["spending"]
     merchant = policy["merchant"]
     currency = spending["currency"]
-    if currency != "CHF":
-        raise ValueError(
-            "Live scenarios are denominated in CHF. Select CHF before creating "
-            "the mandate; currency conversion is not implemented by the classifier."
-        )
-
+    allowed_categories = policy["products"]["allowed_categories"]
+    if not allowed_categories:
+        raise ValueError("At least one allowed product category is required.")
     rules: list[dict[str, Any]] = [
         {
-            "field": "authorization.billing_amount_chf",
+            "field": "authorization.items.item_category",
+            "operator": "in",
+            "value": allowed_categories,
+            "scope": "purchase",
+        },
+        {
+            "field": "authorization.items.unit_price",
             "operator": "<=",
             "value": spending["per_item_purchase_price_max"],
-            "currency": "CHF",
+            "currency": currency,
             "scope": "purchase",
         }
     ]
@@ -81,6 +83,26 @@ def policy_to_hard_rules(policy: dict[str, Any]) -> list[dict[str, Any]]:
                 "scope": "purchase",
             }
         )
+
+    blocklist = merchant.get("blocklist") or []
+    if blocklist:
+        rules.append({"field": "authorization.merchant", "operator": "not_in", "value": blocklist, "scope": "purchase"})
+
+    allowlist = merchant.get("allowlist") or []
+    if allowlist:
+        rules.append({"field": "authorization.merchant", "operator": "in", "value": allowlist, "scope": "purchase"})
+
+    order_terms = policy.get("order_terms", {})
+    if order_terms.get("require_returnable"):
+        rules.append({"field": "authorization.order_returnable", "operator": "=", "value": "true", "scope": "purchase"})
+    if order_terms.get("require_cancellable"):
+        rules.append({"field": "authorization.order_cancellable", "operator": "=", "value": "true", "scope": "purchase"})
+
+    max_attempts = policy.get("session", {}).get("max_recent_attempts_10m")
+    if max_attempts is not None:
+        # The event contains the number of earlier attempts. Using '< max'
+        # means the current attempt remains within a total-attempt cap of max.
+        rules.append({"field": "authorization.recent_attempt_count_10m", "operator": "<", "value": max_attempts, "scope": "purchase"})
     return rules
 
 

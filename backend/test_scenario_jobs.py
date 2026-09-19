@@ -69,11 +69,17 @@ class FakeLeashClient:
                     "amount": 20.0,
                     "currency": "CHF",
                     "billing_amount_chf": 20.0,
+                    "authority_status": "active",
+                    "card_status_at_attempt": "active",
+                    "initiator_type": "agent",
                     "purchase_description": "Groceries",
-                    "items": [],
+                    "items": [{"item_name": "Bread", "item_category": "groceries", "unit_price": 5.0, "currency": "CHF"}],
                 },
                 "mandate": {
-                    "hard_rules": [{"field": "authorization.billing_amount_chf", "operator": "<=", "value": 100, "scope": "purchase"}]
+                    "hard_rules": [
+                        {"field": "authorization.items.item_category", "operator": "in", "value": ["groceries"], "scope": "purchase"},
+                        {"field": "authorization.billing_amount_chf", "operator": "<=", "value": 100, "scope": "purchase"},
+                    ]
                 },
             },
         }
@@ -86,6 +92,7 @@ class FakeLeashClient:
 
 POLICY = {
     "raw_instructions": "Allow purchases up to CHF 100.",
+    "products": {"allowed_categories": ["groceries"]},
     "spending": {"per_item_purchase_price_max": 100, "currency": "CHF"},
     "merchant": {"familiarity_required": False, "familiarity_min_prior_approved": 0},
 }
@@ -94,12 +101,63 @@ POLICY = {
 def test_policy_to_hard_rules():
     assert policy_to_hard_rules(POLICY) == [
         {
-            "field": "authorization.billing_amount_chf",
+            "field": "authorization.items.item_category",
+            "operator": "in",
+            "value": ["groceries"],
+            "scope": "purchase",
+        },
+        {
+            "field": "authorization.items.unit_price",
             "operator": "<=",
             "value": 100,
             "currency": "CHF",
             "scope": "purchase",
         }
+    ]
+
+
+def test_policy_to_all_event_local_rules():
+    policy = {
+        **POLICY,
+        "merchant": {
+            **POLICY["merchant"],
+            "blocklist": ["Blocked Shop"],
+            "allowlist": ["Alpine Basket"],
+        },
+        "order_terms": {"require_returnable": True, "require_cancellable": True},
+        "session": {"max_recent_attempts_10m": 3},
+    }
+    assert policy_to_hard_rules(policy)[2:] == [
+        {
+            "field": "authorization.merchant",
+            "operator": "not_in",
+            "value": ["Blocked Shop"],
+            "scope": "purchase",
+        },
+        {
+            "field": "authorization.merchant",
+            "operator": "in",
+            "value": ["Alpine Basket"],
+            "scope": "purchase",
+        },
+        {
+            "field": "authorization.order_returnable",
+            "operator": "=",
+            "value": "true",
+            "scope": "purchase",
+        },
+        {
+            "field": "authorization.order_cancellable",
+            "operator": "=",
+            "value": "true",
+            "scope": "purchase",
+        },
+        {
+            "field": "authorization.recent_attempt_count_10m",
+            "operator": "<",
+            "value": 3,
+            "scope": "purchase",
+        },
     ]
 
 
@@ -140,5 +198,6 @@ def test_complete_workflow_sequence():
 
 if __name__ == "__main__":
     test_policy_to_hard_rules()
+    test_policy_to_all_event_local_rules()
     test_complete_workflow_sequence()
     print("SCENARIO JOB WORKFLOW TESTS PASSED")

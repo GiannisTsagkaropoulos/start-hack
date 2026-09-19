@@ -9,11 +9,13 @@ from decision_engine import evaluate_purchase
 def test_mandate_snapshot_amount_only():
     mandate = {
         "hard_rules": [
+            {"field": "authorization.items.item_category", "operator": "in", "value": ["groceries"], "scope": "purchase"},
             {"field": "authorization.billing_amount_chf", "operator": "<=", "value": 1000, "currency": "CHF", "scope": "purchase"}
         ],
     }
     policy = mandate_snapshot_to_engine_policy(mandate)
     assert policy.spending.per_item_purchase_price_max == 1000
+    assert policy.products.allowed_categories == ["groceries"]
     assert policy.merchant.familiarity_required is False
 
 
@@ -56,6 +58,15 @@ def test_authorization_event_to_purchase():
         "merchant_id": "ME0001",
         "amount_chf": 20.0,
         "timestamp": "2026-08-09T10:04:00Z",
+        "items": [],
+        "merchant_name": None,
+        "merchant_category": None,
+        "order_returnable": None,
+        "order_cancellable": None,
+        "recent_attempt_count_10m": None,
+        "authority_status": None,
+        "card_status_at_attempt": None,
+        "initiator_type": None,
     }
 
 
@@ -64,6 +75,7 @@ def test_end_to_end_conversion_feeds_existing_engine_unchanged():
     runs unmodified against converted real-shaped input."""
     mandate = {
         "hard_rules": [
+            {"field": "authorization.items.item_category", "operator": "in", "value": ["groceries"], "scope": "purchase"},
             {"field": "authorization.billing_amount_chf", "operator": "<=", "value": 1000, "currency": "CHF", "scope": "purchase"}
         ],
     }
@@ -74,6 +86,12 @@ def test_end_to_end_conversion_feeds_existing_engine_unchanged():
             "card_id": "CA0001",
             "merchant": {"merchant_id": "ME0001"},
             "billing_amount_chf": 20.0,
+            "authority_status": "active",
+            "card_status_at_attempt": "active",
+            "initiator_type": "agent",
+            "items": [
+                {"item_name": "Bread", "item_category": "groceries", "unit_price": 5.0, "currency": "CHF"}
+            ],
         },
     }
     policy = mandate_snapshot_to_engine_policy(mandate)

@@ -15,6 +15,7 @@ import {
 import {
   ParsePolicyResponse,
   ParsedPolicyDraft,
+  ProductCategory,
   ScenarioJobResponse,
   VERDICT_STORAGE_KEY,
   WalletPolicy,
@@ -24,6 +25,9 @@ import {
 function toWalletPolicy(draft: ParsedPolicyDraft): WalletPolicy {
   return {
     raw_instructions: draft.raw_instructions,
+    products: {
+      allowed_categories: draft.products.allowed_categories ?? [],
+    },
     spending: {
       per_item_purchase_price_max: draft.spending.per_item_purchase_price_max as number,
       per_period_purchase_price_max: draft.spending.per_period_purchase_price_max,
@@ -58,7 +62,27 @@ type Step = "select" | "describe" | "review" | "confirm";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+const PRODUCT_CATEGORIES: { label: string; value: ProductCategory }[] = [
+  { label: "Books", value: "books" },
+  { label: "Clothing", value: "clothing" },
+  { label: "Cosmetics", value: "cosmetics" },
+  { label: "Dining", value: "dining" },
+  { label: "Electronics", value: "electronics" },
+  { label: "Food delivery", value: "food_delivery" },
+  { label: "Fuel", value: "fuel" },
+  { label: "Gift cards", value: "gift_card" },
+  { label: "Groceries", value: "groceries" },
+  { label: "Home improvement", value: "home_improvement" },
+  { label: "Hotel", value: "hotel" },
+  { label: "Household", value: "household" },
+  { label: "Membership", value: "membership" },
+  { label: "Sporting goods", value: "sporting_goods" },
+  { label: "Subscriptions", value: "subscriptions" },
+  { label: "Transport", value: "transport" },
+];
+
 const requiredConfirmationFields = [
+  "products.allowed_categories",
   "spending.per_item_purchase_price_max",
   "spending.currency",
   "merchant.familiarity_required",
@@ -70,6 +94,9 @@ const requiredConfirmationFields = [
 
 const DEFAULT_POLICY: ParsedPolicyDraft = {
   raw_instructions: "",
+  products: {
+    allowed_categories: null,
+  },
   spending: {
     per_item_purchase_price_max: null,
     per_period_purchase_price_max: null,
@@ -137,7 +164,8 @@ export default function WalletPage() {
       return (current as Record<string, unknown>)[key];
     }, draftPolicy);
 
-    return value === null || value === undefined || value === "";
+    return value === null || value === undefined || value === "" ||
+      (Array.isArray(value) && value.length === 0);
   };
 
   const missingRequiredFields = requiredConfirmationFields.filter(isUnknown);
@@ -374,9 +402,26 @@ export default function WalletPage() {
                   />
                 </SectionBlock>
 
-                {/* 2. Spending */}
+                {/* 2. Products - the primary authorization rule. */}
                 <SectionBlock
-                  title="2. Spending Controls"
+                  title="2. Allowed Product Categories"
+                  needsAttention={isUnknown("products.allowed_categories")}
+                >
+                  <MultiSelectField
+                    label="Every cart item must match one of these categories"
+                    values={draftPolicy.products?.allowed_categories ?? []}
+                    options={PRODUCT_CATEGORIES}
+                    onChange={(values) =>
+                      updatePolicyValue("products.allowed_categories", values)
+                    }
+                    required
+                    needsAttention={isUnknown("products.allowed_categories")}
+                  />
+                </SectionBlock>
+
+                {/* 3. Spending */}
+                <SectionBlock
+                  title="3. Spending Controls"
                   needsAttention={[
                     "spending.per_item_purchase_price_max",
                     "spending.currency",
@@ -445,9 +490,9 @@ export default function WalletPage() {
                   />
                 </SectionBlock>
 
-                {/* 3. Merchant */}
+                {/* 4. Merchant */}
                 <SectionBlock
-                  title="3. Merchant Rules"
+                  title="4. Merchant Rules"
                   needsAttention={isUnknown("merchant.familiarity_required")}
                 >
                   <SelectField
@@ -472,9 +517,9 @@ export default function WalletPage() {
                   />
                 </SectionBlock>
 
-                {/* 4. Order Terms */}
+                {/* 5. Order Terms */}
                 <SectionBlock
-                  title="4. Order Terms"
+                  title="5. Order Terms"
                   needsAttention={[
                     "order_terms.require_returnable",
                     "order_terms.require_cancellable",
@@ -522,9 +567,9 @@ export default function WalletPage() {
                   />
                 </SectionBlock>
 
-                {/* 5. Session */}
+                {/* 6. Session */}
                 <SectionBlock
-                  title="5. Session Restrictions"
+                  title="6. Session Restrictions"
                   needsAttention={[
                     "session.trusted_devices_only",
                     "session.domestic_only",
@@ -572,9 +617,9 @@ export default function WalletPage() {
                   />
                 </SectionBlock>
 
-                {/* 6. Duplicate Purchase Check - optional, but preserved from the
+                {/* 7. Duplicate Purchase Check - optional, but preserved from the
                     parsed draft instead of silently discarded on confirm. */}
-                <SectionBlock title="6. Duplicate Purchase Check">
+                <SectionBlock title="7. Duplicate Purchase Check">
                   <InputField
                     label="Block repeat purchases within (minutes)"
                     type="number"
@@ -767,6 +812,53 @@ function SelectField({
         ))}
       </select>
     </label>
+  );
+}
+
+function MultiSelectField({
+  label,
+  values,
+  options,
+  onChange,
+  required = false,
+  needsAttention = false,
+}: {
+  label: string;
+  values: ProductCategory[];
+  options: { label: string; value: ProductCategory }[];
+  onChange: (values: ProductCategory[]) => void;
+  required?: boolean;
+  needsAttention?: boolean;
+}) {
+  const selected = new Set(values);
+  return (
+    <fieldset
+      className={`rounded-xl border p-4 ${
+        needsAttention ? "border-amber-300 bg-amber-50" : "border-slate-300 bg-white"
+      }`}
+    >
+      <legend className="px-1 text-sm font-semibold text-slate-700">
+        {label} {required && <span className="text-amber-800">Required</span>}
+      </legend>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        {options.map((option) => (
+          <label key={option.value} className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={selected.has(option.value)}
+              onChange={(event) => {
+                const next = event.target.checked
+                  ? [...values, option.value]
+                  : values.filter((value) => value !== option.value);
+                onChange(next);
+              }}
+              className="size-4 rounded border-slate-300 text-emerald-600"
+            />
+            {option.label}
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 

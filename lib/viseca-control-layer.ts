@@ -8,6 +8,23 @@
  */
 
 export type Currency = "CHF" | "USD" | "EUR";
+export type ProductCategory =
+  | "books"
+  | "clothing"
+  | "cosmetics"
+  | "dining"
+  | "electronics"
+  | "food_delivery"
+  | "fuel"
+  | "gift_card"
+  | "groceries"
+  | "home_improvement"
+  | "hotel"
+  | "household"
+  | "membership"
+  | "sporting_goods"
+  | "subscriptions"
+  | "transport";
 
 export interface ParsePolicyRequest {
   /** Integer from 0 through 31, inclusive. */
@@ -20,6 +37,9 @@ export interface ParsePolicyRequest {
 /** Exact `PolicyResponse.policy` shape returned by the current API. */
 export interface ParsedPolicyDraft {
   raw_instructions: string;
+  products: {
+    allowed_categories: ProductCategory[] | null;
+  };
   spending: {
     per_item_purchase_price_max: number | null;
     per_period_purchase_price_max: number | null;
@@ -66,6 +86,9 @@ export interface ConfirmPolicyResponse {
 /** Exact `ConfirmationRequest.policy` / `DecisionRequest.policy` shape the local backend accepts. */
 export interface WalletPolicy {
   raw_instructions: string;
+  products: {
+    allowed_categories: ProductCategory[];
+  };
   spending: {
     per_item_purchase_price_max: number;
     per_period_purchase_price_max: number | null;

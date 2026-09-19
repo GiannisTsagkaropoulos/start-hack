@@ -6,7 +6,9 @@ The team API key remains in the FastAPI process and is never sent to the browser
 ## Policy parsing
 
 `POST /parse-policy` converts the customer's text into the editable local
-`ParsedPolicyDraft`. This is the review UI's input and is not a Leash mandate.
+`ParsedPolicyDraft`. The LLM must derive at least one
+`products.allowed_categories` value from the requested product. The customer
+reviews that allowlist before confirmation. This draft is not a Leash mandate.
 
 ## Production scenario workflow
 
@@ -32,8 +34,15 @@ store, so restarting FastAPI requires starting a fresh UI job.
 
 ## Current classifier scope
 
-The existing deterministic classifier enforces the CHF per-purchase ceiling and
-the optional prior-merchant requirement. Only those supported checks are
-published as Leash hard rules. Other fields remain in the editable local policy
-but must not be presented as enforced production checks until the classifier is
-extended to evaluate them.
+The deterministic classifier first enforces the confirmed product-category
+allowlist against every cart line. A missing or mismatching category immediately
+declines the authorization without evaluating later rules. It then enforces
+event-local checks for per-item price (when the item currency matches the policy), merchant allow/block lists,
+returnability, cancellability, ten-minute attempt velocity, authority status,
+card status, and initiator type. It also retains the existing historical
+merchant-familiarity lookup. Missing event evidence or a required currency
+conversion produces `step_up`; a known hard-rule violation produces `decline`.
+
+Period spend, trusted-device history, domestic-country resolution, duplicate
+detection, and cross-currency item prices require state or reference-data
+lookups and are not yet published as enforced Leash rules.

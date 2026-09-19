@@ -1,5 +1,5 @@
 """P0 worker: run ONE scenario against the real Leash production server,
-reusing the existing decision_engine.evaluate_purchase() unchanged.
+using the deterministic decision_engine.evaluate_purchase() classifier.
 
 Usage:
     cd backend && source .venv/bin/activate
@@ -36,8 +36,9 @@ def _parse_iso(ts: str) -> datetime:
 # deliberately exercise decline/step_up paths; this is a testing choice made
 # by the caller, never a scenario_id-keyed branch inside engine or client
 # code.
-DEFAULT_MANDATE_INSTRUCTION = "Allow purchases up to CHF 1000 per item."
+DEFAULT_MANDATE_INSTRUCTION = "Allow grocery purchases up to CHF 1000 per item."
 DEFAULT_MANDATE_HARD_RULES = [
+    {"field": "authorization.items.item_category", "operator": "in", "value": ["groceries"], "scope": "purchase"},
     {"field": "authorization.billing_amount_chf", "operator": "<=", "value": 1000, "currency": "CHF", "scope": "purchase"}
 ]
 
