@@ -7,6 +7,10 @@
  * If either is missing, that restriction is simply not highlighted - it
  * still appears normally in the structured review below, just without a
  * decomposition animation pretending it came from a specific word.
+ *
+ * Updated for the line-item cart schema (products.items[], spending.
+ * total_price_max) merged in from origin/ui-fix - the previous category-list
+ * / session / duplicate_check fields no longer exist on ParsedPolicyDraft.
  */
 import { ParsedPolicyDraft, ProductCategory } from "@/lib/viseca-control-layer";
 
@@ -38,19 +42,6 @@ const CATEGORY_LABELS: Record<ProductCategory, string> = {
   transport: "transport",
 };
 
-function findAll(haystackLower: string, needleLower: string): number[] {
-  if (!needleLower) return [];
-  const hits: number[] = [];
-  let from = 0;
-  while (true) {
-    const at = haystackLower.indexOf(needleLower, from);
-    if (at === -1) break;
-    hits.push(at);
-    from = at + needleLower.length;
-  }
-  return hits;
-}
-
 export function extractLanguageFragments(raw: string, draft: ParsedPolicyDraft): LanguageFragment[] {
   const lower = raw.toLowerCase();
   const fragments: LanguageFragment[] = [];
@@ -65,25 +56,37 @@ export function extractLanguageFragments(raw: string, draft: ParsedPolicyDraft):
     fragments.push({ id, start, end, text: raw.slice(start, end), destinationLabel, destinationValue });
   };
 
-  // Amount - match the literal number as typed (integer or decimal).
-  const amount = draft.spending?.per_item_purchase_price_max;
-  if (typeof amount === "number") {
-    const variants = [String(amount), amount.toFixed(2), amount.toFixed(0)];
+  // Total spending cap - match the literal number as typed.
+  const totalMax = draft.spending?.total_price_max;
+  if (typeof totalMax === "number") {
+    const variants = [String(totalMax), totalMax.toFixed(2), totalMax.toFixed(0)];
     for (const variant of variants) {
       const at = lower.indexOf(variant.toLowerCase());
       if (at !== -1) {
-        push(at, variant.length, "amount", "Maximum per item", `${draft.spending.currency ?? ""} ${amount}`.trim());
+        push(at, variant.length, "amount", "Maximum spend", `${draft.spending.currency ?? ""} ${totalMax}`.trim());
         break;
       }
     }
   }
 
-  // Product categories - match the human label if it appears verbatim.
-  for (const category of draft.products?.allowed_categories ?? []) {
-    const label = CATEGORY_LABELS[category];
-    const at = lower.indexOf(label);
-    if (at !== -1) {
-      push(at, label.length, `category-${category}`, "Allowed category", label);
+  // Cart line items - match the item's own name, category label, or its
+  // per-item price cap if one was set.
+  for (const [index, item] of (draft.products?.items ?? []).entries()) {
+    if (item.name) {
+      const at = lower.indexOf(item.name.toLowerCase());
+      if (at !== -1) push(at, item.name.length, `item-${index}-name`, "Requested item", item.name);
+    }
+    if (item.category) {
+      const label = CATEGORY_LABELS[item.category];
+      const at = lower.indexOf(label);
+      if (at !== -1) push(at, label.length, `item-${index}-category`, "Category", label);
+    }
+    if (typeof item.max_price_per_item === "number") {
+      const variant = String(item.max_price_per_item);
+      const at = lower.indexOf(variant.toLowerCase());
+      if (at !== -1) {
+        push(at, variant.length, `item-${index}-price`, "Per-item limit", `${draft.spending.currency ?? ""} ${item.max_price_per_item}`.trim());
+      }
     }
   }
 
@@ -102,37 +105,6 @@ export function extractLanguageFragments(raw: string, draft: ParsedPolicyDraft):
       const at = lower.indexOf(needle);
       if (at !== -1) {
         push(at, needle.length, "cancellable", "Order requirement", "Cancellable");
-        break;
-      }
-    }
-  }
-
-  // Session / security.
-  if (draft.session?.trusted_devices_only) {
-    for (const needle of ["trusted device", "trusted devices", "device"]) {
-      const at = lower.indexOf(needle);
-      if (at !== -1) {
-        push(at, needle.length, "trusted-device", "Session", "Trusted devices only");
-        break;
-      }
-    }
-  }
-  if (draft.session?.domestic_only) {
-    for (const needle of ["domestic", "switzerland", "swiss"]) {
-      const at = lower.indexOf(needle);
-      if (at !== -1) {
-        push(at, needle.length, "domestic", "Session", "Domestic only");
-        break;
-      }
-    }
-  }
-
-  // Duplicate check.
-  if (draft.duplicate_check?.block_repeats_within_minutes) {
-    for (const needle of ["repeat", "duplicate", "again"]) {
-      const hits = findAll(lower, needle);
-      if (hits.length) {
-        push(hits[0], needle.length, "duplicate", "Duplicate window", `${draft.duplicate_check.block_repeats_within_minutes} min`);
         break;
       }
     }
