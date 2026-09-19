@@ -1,77 +1,133 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   ArrowLeft,
   ArrowRight,
-  Check,
   CheckCircle2,
+  Plus,
   ShieldCheck,
-  Sparkles,
+  Trash2,
 } from "lucide-react";
 import {
   ParsePolicyResponse,
   ParsedPolicyDraft,
-  toLocalMandateV2,
+  ProductCategory,
+  ScenarioJobResponse,
+  VERDICT_STORAGE_KEY,
+  WalletPolicy,
+  readErrorMessage,
 } from "@/lib/viseca-control-layer";
 
-type Step = "select" | "describe" | "review";
+function toWalletPolicy(draft: ParsedPolicyDraft): WalletPolicy {
+  return {
+    raw_instructions: draft.raw_instructions,
+    products: {
+      items: (draft.products.items ?? []).map((item) => ({
+        name: item.name as string,
+        category: item.category as ProductCategory,
+        quantity: item.quantity as number,
+        max_price_per_item: item.max_price_per_item ?? null,
+      })),
+    },
+    spending: {
+      total_price_max: draft.spending.total_price_max ?? null,
+      currency: draft.spending.currency as WalletPolicy["spending"]["currency"],
+      period_in_days: draft.spending.period_in_days ?? null,
+    },
+    merchant: {
+      blocklist: draft.merchant.blocklist ?? [],
+      allowlist: draft.merchant.allowlist ?? [],
+    },
+    order_terms: {
+      require_returnable: draft.order_terms.require_returnable ?? true,
+      require_cancellable: draft.order_terms.require_cancellable ?? true,
+    },
+    notes_for_customer: draft.notes_for_customer ?? "",
+  };
+}
+
+type Step = "describe" | "review";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const WALLET_ID = 0;
 
-const requiredConfirmationFields = [
-  "spending.per_item_purchase_price_max",
-  "spending.currency",
-  "merchant.familiarity_required",
-  "order_terms.require_returnable",
-  "order_terms.require_cancellable",
-  "session.trusted_devices_only",
-  "session.domestic_only",
-] as const;
+const PRODUCT_CATEGORIES: { label: string; value: ProductCategory }[] = [
+  { label: "Books", value: "books" },
+  { label: "Clothing", value: "clothing" },
+  { label: "Cosmetics", value: "cosmetics" },
+  { label: "Dining", value: "dining" },
+  { label: "Electronics", value: "electronics" },
+  { label: "Food delivery", value: "food_delivery" },
+  { label: "Fuel", value: "fuel" },
+  { label: "Gift cards", value: "gift_card" },
+  { label: "Groceries", value: "groceries" },
+  { label: "Home improvement", value: "home_improvement" },
+  { label: "Hotel", value: "hotel" },
+  { label: "Household", value: "household" },
+  { label: "Membership", value: "membership" },
+  { label: "Sporting goods", value: "sporting_goods" },
+  { label: "Subscriptions", value: "subscriptions" },
+  { label: "Transport", value: "transport" },
+];
+
+type DraftItem = NonNullable<ParsedPolicyDraft["products"]["items"]>[number];
+
+function getMissingRequiredFields(policy: ParsedPolicyDraft): string[] {
+  const missing: string[] = [];
+  const items = policy.products.items ?? [];
+  if (items.length === 0) missing.push("products.items");
+  items.forEach((item, index) => {
+    if (!item.name?.trim()) missing.push(`products.items.${index}.name`);
+    if (!item.category) missing.push(`products.items.${index}.category`);
+    if (!item.quantity || item.quantity < 1) missing.push(`products.items.${index}.quantity`);
+  });
+
+  const hasItemLimit = items.some((item) => item.max_price_per_item !== null);
+  if (policy.spending.total_price_max === null && !hasItemLimit) {
+    missing.push("spending.total_price_max_or_item_limit");
+  }
+  if (!policy.spending.currency) missing.push("spending.currency");
+  if (policy.spending.period_in_days !== null && policy.spending.total_price_max === null) {
+    missing.push("spending.total_price_max");
+  }
+  return missing;
+}
 
 const DEFAULT_POLICY: ParsedPolicyDraft = {
   raw_instructions: "",
+  products: {
+    items: null,
+  },
   spending: {
-    per_item_purchase_price_max: null,
-    per_period_purchase_price_max: null,
+    total_price_max: null,
     currency: null,
     period_in_days: null,
   },
   merchant: {
-    familiarity_required: null,
-    familiarity_min_prior_approved: 0,
     blocklist: [],
     allowlist: [],
   },
   order_terms: {
-    require_returnable: null,
-    require_cancellable: null,
-  },
-  session: {
-    max_recent_attempts_10m: null,
-    trusted_devices_only: true,
-    domestic_only: null,
+    require_returnable: true,
+    require_cancellable: true,
   },
   notes_for_customer: "",
 };
 
 export default function WalletPage() {
   const router = useRouter();
-  const [step, setStep] = useState<Step>("select");
-  const [walletId, setWalletId] = useState("");
+  const [step, setStep] = useState<Step>("describe");
   const [policyText, setPolicyText] = useState("");
   const [draftPolicy, setDraftPolicy] = useState<ParsedPolicyDraft>(DEFAULT_POLICY);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  const progress = useMemo(
-    () => ({ select: 1, describe: 2, review: 3 })[step],
-    [step],
-  );
+  const progress = step === "describe" ? 1 : 2;
 
   const updatePolicyValue = (path: string, value: unknown) => {
     const keys = path.split(".");
@@ -91,23 +147,51 @@ export default function WalletPage() {
 
   };
 
+  const updateItem = (index: number, field: keyof DraftItem, value: DraftItem[keyof DraftItem]) => {
+    setDraftPolicy((previous) => {
+      const items = [...(previous.products.items ?? [])];
+      items[index] = { ...items[index], [field]: value };
+      return { ...previous, products: { items } };
+    });
+  };
+
+  const addItem = () => {
+    setDraftPolicy((previous) => ({
+      ...previous,
+      products: {
+        items: [
+          ...(previous.products.items ?? []),
+          { name: "", category: null, quantity: null, max_price_per_item: null },
+        ],
+      },
+    }));
+  };
+
+  const removeItem = (index: number) => {
+    setDraftPolicy((previous) => ({
+      ...previous,
+      products: {
+        items: (previous.products.items ?? []).filter((_, itemIndex) => itemIndex !== index),
+      },
+    }));
+  };
+
   const isUnknown = (path: string) => {
     const value = path.split(".").reduce<unknown>((current, key) => {
       if (typeof current !== "object" || current === null) return undefined;
       return (current as Record<string, unknown>)[key];
     }, draftPolicy);
 
-    return value === null || value === undefined || value === "";
+    return value === null || value === undefined || value === "" ||
+      (Array.isArray(value) && value.length === 0);
   };
 
-  const missingRequiredFields = requiredConfirmationFields.filter(isUnknown);
-
-  const selectWallet = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!walletId) return;
-    setStep("describe");
-    setError("");
-  };
+  const requestedItems = draftPolicy.products.items ?? [];
+  const hasItemPriceLimit = requestedItems.some((item) => item.max_price_per_item !== null);
+  const needsMonetaryLimit = draftPolicy.spending.total_price_max === null && !hasItemPriceLimit;
+  const periodNeedsTotal =
+    draftPolicy.spending.period_in_days !== null && draftPolicy.spending.total_price_max === null;
+  const missingRequiredFields = getMissingRequiredFields(draftPolicy);
 
   const submitPolicy = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -120,12 +204,12 @@ export default function WalletPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          wallet_id: Number(walletId),
+          wallet_id: WALLET_ID,
           policy_text: policyText.trim(),
         }),
       });
 
-      if (!res.ok) throw new Error("Failed to parse the policy.");
+      if (!res.ok) throw new Error(await readErrorMessage(res, "Failed to parse the policy."));
 
       const data = (await res.json()) as ParsePolicyResponse;
       setDraftPolicy(data.policy);
@@ -137,7 +221,7 @@ export default function WalletPage() {
     }
   };
 
-  const confirmPolicy = async (e: FormEvent<HTMLFormElement>) => {
+  const prepareMandate = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (missingRequiredFields.length > 0) {
       setError("Please answer every yellow required field before confirming the policy.");
@@ -148,23 +232,41 @@ export default function WalletPage() {
     setError("");
 
     try {
-      const res = await fetch(`${API_URL}/confirm-policy`, {
+      const policy = toWalletPolicy(draftPolicy);
+
+      const prepareRes = await fetch(`${API_URL}/leash/mandates/prepare`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          wallet_id: Number(walletId),
-          policy: toLocalMandateV2(draftPolicy, policyText),
+          wallet_id: WALLET_ID,
+          policy,
         }),
       });
 
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.detail?.[0]?.msg || "Validation failed.");
+      if (!prepareRes.ok) {
+        throw new Error(await readErrorMessage(prepareRes, "The Leash mandate draft could not be created."));
       }
 
+      const preparedJob = (await prepareRes.json()) as ScenarioJobResponse;
+      const response = await fetch(`${API_URL}/leash/jobs/${preparedJob.job_id}/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          await readErrorMessage(response, "The mandate could not be confirmed or started."),
+        );
+      }
+
+      const confirmedJob = (await response.json()) as ScenarioJobResponse;
+      sessionStorage.setItem(
+        VERDICT_STORAGE_KEY,
+        JSON.stringify({ job_id: confirmedJob.job_id }),
+      );
       router.push("/verdict");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Confirmation failed.");
+      setError(err instanceof Error ? err.message : "Could not prepare and start the scenario run.");
     } finally {
       setIsSubmitting(false);
     }
@@ -190,48 +292,14 @@ export default function WalletPage() {
           <div className="mb-8 flex items-center justify-between">
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">
-                Step {progress} of 3
+                Step {progress} of 2
               </p>
               <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-                {step === "select" && "Choose a wallet"}
                 {step === "describe" && "Describe your shopping rules"}
                 {step === "review" && "Review your wallet policy"}
               </h1>
             </div>
           </div>
-
-          {step === "select" && (
-            <form onSubmit={selectWallet} className="space-y-6">
-              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
-                  <Sparkles size={24} />
-                </div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">
-                  Wallet ID
-                </label>
-                <select
-                  value={walletId}
-                  onChange={(e) => setWalletId(e.target.value)}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base outline-none focus:border-emerald-500"
-                  required
-                >
-                  <option value="">Select an ID</option>
-                  {Array.from({ length: 32 }, (_, id) => (
-                    <option key={id} value={id}>
-                      Wallet {id}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <button
-                type="submit"
-                disabled={!walletId}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-3.5 font-semibold text-white hover:bg-slate-700 disabled:opacity-40"
-              >
-                Continue <ArrowRight size={18} />
-              </button>
-            </form>
-          )}
 
           {step === "describe" && (
             <form onSubmit={submitPolicy} className="space-y-6">
@@ -248,14 +316,7 @@ export default function WalletPage() {
                 />
               </div>
               {error && <ErrorMessage message={error} />}
-              <div className="flex justify-between">
-                <button
-                  type="button"
-                  onClick={() => setStep("select")}
-                  className="flex items-center gap-2 rounded-xl px-4 py-3 font-semibold text-slate-600 hover:bg-slate-200"
-                >
-                  <ArrowLeft size={18} /> Back
-                </button>
+              <div className="flex justify-end">
                 <button
                   type="submit"
                   disabled={!policyText.trim() || isSubmitting}
@@ -269,7 +330,7 @@ export default function WalletPage() {
           )}
 
           {step === "review" && (
-            <form onSubmit={confirmPolicy} className="space-y-8">
+            <form onSubmit={prepareMandate} className="space-y-8">
               {/* Header Status */}
               <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="flex items-start justify-between">
@@ -302,32 +363,101 @@ export default function WalletPage() {
                   />
                 </SectionBlock>
 
-                {/* 2. Spending */}
+                {/* 2. Requested items - category remains the primary rule. */}
                 <SectionBlock
-                  title="2. Spending Controls"
-                  needsAttention={[
-                    "spending.per_item_purchase_price_max",
-                    "spending.currency",
-                    "spending.per_period_purchase_price_max",
-                    "spending.period_in_days",
-                  ].some(isUnknown)}
+                  title="2. Requested Items"
+                  needsAttention={
+                    requestedItems.length === 0 ||
+                    requestedItems.some((item) => !item.name || !item.category || !item.quantity)
+                  }
                 >
-                  <InputField
-                    label="Max Price Per Item"
-                    type="number"
-                    value={
-                      draftPolicy.spending?.per_item_purchase_price_max ?? ""
-                    }
-                    placeholder="e.g. 120.00"
-                    onChange={(val) =>
-                      updatePolicyValue(
-                        "spending.per_item_purchase_price_max",
-                        val ? parseFloat(val) : null,
-                      )
-                    }
-                    required
-                    needsAttention={isUnknown("spending.per_item_purchase_price_max")}
-                  />
+                  <p className="text-sm leading-6 text-slate-500">
+                    Each row becomes a separate mandate item. Category is checked first;
+                    quantity is tracked cumulatively across approved purchases.
+                  </p>
+                  {requestedItems.map((item, index) => (
+                    <div
+                      key={index}
+                      className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                    >
+                      <div className="mb-3 flex items-center justify-between">
+                        <h4 className="font-semibold text-slate-800">Item {index + 1}</h4>
+                        <button
+                          type="button"
+                          onClick={() => removeItem(index)}
+                          className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                          aria-label={`Remove item ${index + 1}`}
+                        >
+                          <Trash2 size={17} />
+                        </button>
+                      </div>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <InputField
+                          label="Requested object"
+                          value={item.name ?? ""}
+                          placeholder="e.g. computer monitor"
+                          onChange={(value) => updateItem(index, "name", value || null)}
+                          required
+                          needsAttention={!item.name}
+                        />
+                        <SelectField
+                          label="Product category"
+                          value={item.category ?? ""}
+                          options={PRODUCT_CATEGORIES}
+                          onChange={(value) =>
+                            updateItem(index, "category", (value || null) as ProductCategory | null)
+                          }
+                          required
+                          needsAttention={!item.category}
+                        />
+                        <InputField
+                          label="Total quantity allowed"
+                          type="number"
+                          value={item.quantity ?? ""}
+                          placeholder="e.g. 1"
+                          onChange={(value) =>
+                            updateItem(index, "quantity", value ? parseInt(value, 10) : null)
+                          }
+                          required
+                          needsAttention={!item.quantity}
+                          min="1"
+                          step="1"
+                        />
+                        <InputField
+                          label="Max price for this item"
+                          type="number"
+                          value={item.max_price_per_item ?? ""}
+                          placeholder="Optional when a total limit is set"
+                          onChange={(value) =>
+                            updateItem(
+                              index,
+                              "max_price_per_item",
+                              value ? parseFloat(value) : null,
+                            )
+                          }
+                          needsAttention={needsMonetaryLimit}
+                          min="0.01"
+                          step="0.01"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={addItem}
+                    className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-emerald-400 px-4 py-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-50"
+                  >
+                    <Plus size={17} /> Add another item
+                  </button>
+                </SectionBlock>
+
+                {/* 3. Spending */}
+                <SectionBlock
+                  title="3. Spending Controls"
+                  needsAttention={
+                    needsMonetaryLimit || isUnknown("spending.currency") || periodNeedsTotal
+                  }
+                >
                   <SelectField
                     label="Currency"
                     value={draftPolicy.spending?.currency || ""}
@@ -343,70 +473,27 @@ export default function WalletPage() {
                     needsAttention={isUnknown("spending.currency")}
                   />
                   <InputField
-                    label="Max Price Per Period"
+                    label="Maximum total spend"
                     type="number"
-                    value={
-                      draftPolicy.spending?.per_period_purchase_price_max ?? ""
-                    }
+                    value={draftPolicy.spending?.total_price_max ?? ""}
                     placeholder="e.g. 500.00"
                     onChange={(val) =>
                       updatePolicyValue(
-                        "spending.per_period_purchase_price_max",
+                        "spending.total_price_max",
                         val ? parseFloat(val) : null,
                       )
                     }
-                    needsAttention={isUnknown("spending.per_period_purchase_price_max")}
+                    required={needsMonetaryLimit || periodNeedsTotal}
+                    needsAttention={needsMonetaryLimit || periodNeedsTotal}
+                    min="0.01"
+                    step="0.01"
                   />
 
-                  <InputField
-                    label="Period (in Days)"
-                    type="number"
-                    value={draftPolicy.spending?.period_in_days ?? ""}
-                    placeholder="e.g. 30"
-                    onChange={(val) =>
-                      updatePolicyValue(
-                        "spending.period_in_days",
-                        val ? parseInt(val) : null,
-                      )
-                    }
-                    needsAttention={isUnknown("spending.period_in_days")}
-                  />
-                </SectionBlock>
-
-                {/* 3. Merchant */}
-                <SectionBlock
-                  title="3. Merchant Rules"
-                  needsAttention={isUnknown("merchant.familiarity_required")}
-                >
-                  <SelectField
-                    label="Familiarity Required"
-                    value={
-                      draftPolicy.merchant?.familiarity_required === null
-                        ? ""
-                        : String(draftPolicy.merchant?.familiarity_required)
-                    }
-                    options={[
-                      { label: "Yes", value: "true" },
-                      { label: "No", value: "false" },
-                    ]}
-                    onChange={(val) =>
-                      updatePolicyValue(
-                        "merchant.familiarity_required",
-                        val === "" ? null : val === "true",
-                      )
-                    }
-                    required
-                    needsAttention={isUnknown("merchant.familiarity_required")}
-                  />
                 </SectionBlock>
 
                 {/* 4. Order Terms */}
                 <SectionBlock
                   title="4. Order Terms"
-                  needsAttention={[
-                    "order_terms.require_returnable",
-                    "order_terms.require_cancellable",
-                  ].some(isUnknown)}
                 >
                   <SelectField
                     label="Require Returnable"
@@ -426,7 +513,6 @@ export default function WalletPage() {
                       )
                     }
                     required
-                    needsAttention={isUnknown("order_terms.require_returnable")}
                   />
                   <SelectField
                     label="Require Cancellable"
@@ -446,57 +532,6 @@ export default function WalletPage() {
                       )
                     }
                     required
-                    needsAttention={isUnknown("order_terms.require_cancellable")}
-                  />
-                </SectionBlock>
-
-                {/* 5. Session */}
-                <SectionBlock
-                  title="5. Session Restrictions"
-                  needsAttention={[
-                    "session.trusted_devices_only",
-                    "session.domestic_only",
-                  ].some(isUnknown)}
-                >
-                  <SelectField
-                    label="Trusted Devices Only"
-                    value={
-                      draftPolicy.session?.trusted_devices_only === null
-                        ? ""
-                        : String(draftPolicy.session?.trusted_devices_only)
-                    }
-                    options={[
-                      { label: "Yes", value: "true" },
-                      { label: "No", value: "false" },
-                    ]}
-                    onChange={(val) =>
-                      updatePolicyValue(
-                        "session.trusted_devices_only",
-                        val === "" ? null : val === "true",
-                      )
-                    }
-                    required
-                    needsAttention={isUnknown("session.trusted_devices_only")}
-                  />
-                  <SelectField
-                    label="Domestic Purchases Only"
-                    value={
-                      draftPolicy.session?.domestic_only === null
-                        ? ""
-                        : String(draftPolicy.session?.domestic_only)
-                    }
-                    options={[
-                      { label: "Yes", value: "true" },
-                      { label: "No", value: "false" },
-                    ]}
-                    onChange={(val) =>
-                      updatePolicyValue(
-                        "session.domestic_only",
-                        val === "" ? null : val === "true",
-                      )
-                    }
-                    required
-                    needsAttention={isUnknown("session.domestic_only")}
                   />
                 </SectionBlock>
               </div>
@@ -517,8 +552,8 @@ export default function WalletPage() {
                   disabled={isSubmitting}
                   className="flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-3.5 font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
                 >
-                  {isSubmitting ? "Confirming..." : "Confirm policy"}{" "}
-                  <Check size={18} />
+                  {isSubmitting ? "Starting scenarios..." : "Run scenario evaluation"}{" "}
+                  <ArrowRight size={18} />
                 </button>
               </div>
             </form>
@@ -560,6 +595,8 @@ function InputField({
   placeholder = "",
   required = false,
   needsAttention = false,
+  min,
+  step,
 }: {
   label: string;
   value: string | number;
@@ -568,6 +605,8 @@ function InputField({
   placeholder?: string;
   required?: boolean;
   needsAttention?: boolean;
+  min?: string;
+  step?: string;
 }) {
   return (
     <label className="block text-sm font-semibold text-slate-700">
@@ -577,6 +616,8 @@ function InputField({
         value={value}
         placeholder={placeholder}
         required={required}
+        min={min}
+        step={step}
         onChange={(e) => onChange(e.target.value)}
         className={`mt-1 w-full rounded-xl border px-4 py-2.5 font-normal outline-none focus:border-emerald-500 ${
           needsAttention ? "border-amber-300 bg-amber-50" : "border-slate-300 bg-white"
@@ -612,7 +653,7 @@ function SelectField({
           needsAttention ? "border-amber-300 bg-amber-50" : "border-slate-300 bg-white"
         }`}
       >
-        <option value="">{required ? "Select an option" : "Don&apos;t care"}</option>
+        <option value="">{required ? "Select an option" : "Don't care"}</option>
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
             {opt.label}
