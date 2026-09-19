@@ -13,7 +13,6 @@ import {
 import {
   AuthorityBlock,
   ExternalBlock,
-  InterpretedBlock,
 } from "@/components/wallet/AuthorityGrammar";
 
 type Step = "select" | "describe" | "review";
@@ -301,16 +300,29 @@ export default function WalletPage() {
                 </h1>
               </div>
 
-              {/* Their words — unchanged, quoted, never silently rewritten */}
-              <InterpretedBlock eyebrow="Your words">
-                <p className="text-slate-700 leading-relaxed">
-                  "{draftPolicy.raw_instructions || policyText}"
-                </p>
-              </InterpretedBlock>
-
-              {/* What we understood — editable, explicitly separate from "your words" */}
-              <InterpretedBlock eyebrow="What we understood">
-                <div className="divide-y divide-slate-100">
+              {/* One transformation, one container: their words become structured
+                  rules in the same visual object, not two separate boxes the
+                  eye has to reconcile on its own. */}
+              <div className="rounded-2xl border-2 border-slate-200 bg-white overflow-hidden">
+                <div className="px-6 pt-5 pb-4 bg-slate-50/80">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 mb-1.5">
+                    You said
+                  </p>
+                  <p className="text-slate-600 italic leading-relaxed">
+                    "{draftPolicy.raw_instructions || policyText}"
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 px-6">
+                  <div className="h-px flex-1 bg-slate-200" />
+                  <ArrowRight size={14} className="text-slate-300 rotate-90" />
+                  <div className="h-px flex-1 bg-slate-200" />
+                </div>
+                <div className="px-6 pt-4 pb-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 mb-1">
+                    We understood
+                  </p>
+                </div>
+                <div className="divide-y divide-slate-100 px-6 pb-2">
                   <ReviewRow
                     label={FIELD_LABELS["spending.per_item_purchase_price_max"]}
                     isMissing={missingFields.includes("spending.per_item_purchase_price_max")}
@@ -381,7 +393,7 @@ export default function WalletPage() {
                     onChange={(v) => updatePolicyValue("session.domestic_only", v)}
                   />
                 </div>
-              </InterpretedBlock>
+              </div>
 
               {missingFields.length > 0 && (
                 <ExternalBlock eyebrow="We're not guessing at these — tell us or we'll ask you every time">
@@ -483,11 +495,11 @@ function ReviewRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-3.5">
-      <span className="text-sm font-medium text-slate-600 flex items-center gap-2">
+    <div className="flex flex-col gap-2 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+      <span className="text-sm font-medium text-slate-600 flex items-center gap-2 flex-wrap">
         {label}
         {isMissing && (
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+          <span className="shrink-0 whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
             Not set
           </span>
         )}
