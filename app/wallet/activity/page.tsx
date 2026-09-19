@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ShieldBan } from "lucide-react";
+import { ShieldBan } from "lucide-react";
+import { AuthorityPanel, WalletPolicy } from "@/components/wallet/AuthorityPanel";
 
 /**
  * CONVERGED DIRECTION — composed from three prototyped concepts
@@ -46,39 +47,71 @@ const SCENARIOS = [
   { id: "AU0016", name: "Unstated return policy" },
 ];
 
+// Representative fallback if no confirmed wallet exists in this browser yet
+// (e.g. this screen was opened directly, without going through /wallet first).
+const FALLBACK_POLICY: WalletPolicy = {
+  spending: { per_item_purchase_price_max: 120, currency: "CHF" },
+  order_terms: { require_returnable: true },
+  session: { trusted_devices_only: true },
+};
+
 export default function ActivityPage() {
   const [activeId, setActiveId] = useState("AU0040");
+  const [walletId, setWalletId] = useState<string | null>(null);
+  const [policy, setPolicy] = useState<WalletPolicy>(FALLBACK_POLICY);
+
+  // Design-prototype bridge only (see wallet/page.tsx) — reads the policy that
+  // was actually confirmed in this browser, if any. Not a real fetch from a
+  // backend, because no persisted-policy endpoint exists yet.
+  useEffect(() => {
+    for (let id = 0; id < 32; id++) {
+      try {
+        const raw = sessionStorage.getItem(`leash:wallet:${id}`);
+        if (raw) {
+          setWalletId(String(id));
+          setPolicy(JSON.parse(raw));
+          return;
+        }
+      } catch {
+        break;
+      }
+    }
+  }, []);
+
   const { purchase, result } = FIXTURES[activeId];
-  const ruleMax = 120.0;
+  const ruleMax = policy.spending?.per_item_purchase_price_max ?? 120.0;
   const overLimit = purchase.billing_amount_chf > ruleMax;
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row bg-[#f7f9f7] text-slate-900">
-      {/* Left plane — pinned human authority. Never scrolls with activity. */}
-      <aside className="lg:w-[36%] lg:min-h-screen bg-ink-900 text-white p-6 sm:p-8 flex flex-col justify-between">
-        <div>
-          <Link href="/" className="text-lg font-bold text-white mb-8 inline-block">Leash</Link>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-300 mb-4">
-            Your authority — wallet 7
-          </p>
-          <p className="text-3xl font-bold tabular-nums">CHF {ruleMax.toFixed(2)}</p>
-          <p className="text-sm text-slate-400 mb-4">maximum per item</p>
-          <div className="h-px bg-white/10 mb-4" />
-          <p className="text-sm text-slate-300">Returnable items only</p>
-          <p className="text-sm text-slate-300">Trusted devices only</p>
-        </div>
-        <p className="text-[11px] text-slate-500 leading-relaxed mt-8 lg:mt-0">
-          Nothing on the right can edit this. Only a decision — approve, decline,
-          or a question back to you — ever crosses over.
-        </p>
-      </aside>
+      {/* Left plane — pinned human authority. The exact same AuthorityPanel
+          rendered at the end of the mandate flow, fed the same policy, not a
+          re-styled duplicate. */}
+      <div className="lg:w-[36%]">
+        <AuthorityPanel
+          walletId={walletId ?? "7"}
+          policy={policy}
+          pinned
+          footer={
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              Nothing on the right can edit this. Only a decision — approve,
+              decline, or a question back to you — ever crosses over.
+            </p>
+          }
+        />
+      </div>
 
       {/* Right plane — everything outside the boundary: agent + merchant + decision */}
       <section className="flex-1 p-6 sm:p-8">
         <div className="flex items-center justify-between gap-4 mb-6">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-            Agent activity — outside the boundary
-          </p>
+          <div>
+            <Link href="/" className="text-lg font-bold text-slate-800 mb-1 inline-block">
+              Leash
+            </Link>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+              Agent activity — outside the boundary
+            </p>
+          </div>
           <span className="shrink-0 rounded-full border border-slate-300 px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-wide text-slate-400">
             Fixture data
           </span>

@@ -14,6 +14,7 @@ import {
   AuthorityBlock,
   ExternalBlock,
 } from "@/components/wallet/AuthorityGrammar";
+import { AuthorityPanel } from "@/components/wallet/AuthorityPanel";
 
 type Step = "select" | "describe" | "review";
 
@@ -172,6 +173,17 @@ export default function WalletPage() {
         throw new Error(errData.detail?.[0]?.msg || "Validation failed. Nothing was granted.");
       }
       setIsConfirmed(true);
+      // Design-prototype bridge only — Giannis's real /confirm-policy doesn't
+      // persist anything yet (see INTEGRATION_CONTRACT.md), so there's nothing
+      // real to fetch on /wallet/activity. This lets the design candidate show
+      // the SAME confirmed policy object on both screens without inventing
+      // real persistence, which isn't ours to build.
+      try {
+        sessionStorage.setItem(`leash:wallet:${walletId}`, JSON.stringify(draftPolicy));
+      } catch {
+        // sessionStorage unavailable (private mode etc.) - activity page falls
+        // back to its own representative fixture, not a functional loss here.
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Confirmation failed. Nothing was granted.");
     } finally {
@@ -448,22 +460,29 @@ export default function WalletPage() {
                   </div>
                 </AuthorityBlock>
               ) : (
-                <AuthorityBlock eyebrow="Authority active">
-                  <div className="flex items-center gap-3">
-                    <ShieldCheck className="text-emerald-400 shrink-0" size={22} />
-                    <p className="text-sm text-slate-200">
-                      Wallet {walletId} is now live under these exact rules. Every
-                      purchase the agent attempts will be checked against them before
-                      anything is spent.
-                    </p>
-                  </div>
-                  <Link
-                    href="/wallet/activity"
-                    className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-emerald-300 hover:text-emerald-200"
-                  >
-                    See how a purchase gets checked against this <ArrowRight size={14} />
-                  </Link>
-                </AuthorityBlock>
+                // Same AuthorityPanel component /wallet/activity pins as its left
+                // plane — not a matching style, the identical object, fed the
+                // policy that was just confirmed. This is what makes mandate
+                // creation and purchase evaluation feel like one continuous
+                // territory instead of two different screens.
+                <AuthorityPanel
+                  walletId={walletId}
+                  policy={draftPolicy}
+                  footer={
+                    <div>
+                      <div className="flex items-center gap-2 text-sm text-emerald-300 mb-3">
+                        <ShieldCheck size={16} />
+                        <span>Active — every purchase attempt is checked against this</span>
+                      </div>
+                      <Link
+                        href="/wallet/activity"
+                        className="inline-flex items-center gap-2 text-sm font-semibold text-white hover:text-emerald-200"
+                      >
+                        See how a purchase gets checked against this <ArrowRight size={14} />
+                      </Link>
+                    </div>
+                  }
+                />
               )}
 
               {error && <ErrorMessage message={error} />}
