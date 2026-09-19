@@ -10,6 +10,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --color-ink-900: #0f172a;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -23,4 +24,37 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Tailwind's preflight strips the default focus ring; elements styled with
+   outline-none for their own focus treatment (border-color changes on
+   inputs) keep that, but anything relying on the browser default -
+   buttons, links - was left with no visible keyboard focus at all. This
+   restores one, globally, without fighting each component's own styling. */
+a:focus-visible,
+button:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 2px;
+}
+
+/* The moment structured constraints become granted authority - a short,
+   restrained entrance, not a form Submit. ~350ms, respects reduced motion. */
+@keyframes grant-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.grant-in {
+  animation: grant-in 0.35s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .grant-in {
+    animation: none;
+  }
 }
