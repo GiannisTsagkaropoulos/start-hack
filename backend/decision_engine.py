@@ -1,6 +1,8 @@
 import csv
 import os
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
+from functools import lru_cache
 from typing import Literal
 
 from pydantic import BaseModel
@@ -26,11 +28,12 @@ class DecisionResponse(BaseModel):
     decision: Literal["approve", "decline", "step_up"]
     reason_codes: list[ReasonCode]
     evidence: list[DecisionEvidence]
-    engine_version: str = "rule-classifier-v5"
+    engine_version: str = "rule-classifier-v7"
 
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 _HISTORY_CSV = os.path.join(_DATA_DIR, "authorization_history.csv")
+_FX_RATES_CSV = os.path.join(_DATA_DIR, "fx_rates.csv")
 
 # There is no live purchase simulator wired up yet, so every confirmed policy
 # is classified against the supplied connection-check purchase (AU0001: a
@@ -73,19 +76,111 @@ def get_purchase_to_evaluate() -> dict:
     return DEMO_PURCHASE
 
 
+@lru_cache(maxsize=1)
+def _load_history_rows() -> tuple[dict[str, str], ...] | None:
+    if not os.path.exists(_HISTORY_CSV):
+        return None
+    with open(_HISTORY_CSV, newline="", encoding="utf-8") as fh:
+        return tuple(csv.DictReader(fh))
+
+
 def _count_prior_merchant_transactions(merchant_id: str, before: datetime) -> int | None:
     """Count earlier transactions for this merchant across every user/card."""
-    if not os.path.exists(_HISTORY_CSV):
+    rows = _load_history_rows()
+    if rows is None:
         return None
 
     count = 0
-    with open(_HISTORY_CSV, newline="", encoding="utf-8") as fh:
-        for row in csv.DictReader(fh):
-            if row["merchant_id"] != merchant_id:
-                continue
-            if datetime.fromisoformat(row["timestamp"].replace("Z", "+00:00")) < before:
-                count += 1
+    for row in rows:
+        if row["merchant_id"] != merchant_id:
+            continue
+        if datetime.fromisoformat(row["timestamp"].replace("Z", "+00:00")) < before:
+            count += 1
     return count
+
+
+@lru_cache(maxsize=1)
+def _load_fx_rates() -> dict[str, float] | None:
+    if not os.path.exists(_FX_RATES_CSV):
+        return None
+    with open(_FX_RATES_CSV, newline="", encoding="utf-8") as fh:
+        return {
+            row["from_currency"]: float(row["rate"])
+            for row in csv.DictReader(fh)
+            if row.get("to_currency") == "CHF"
+        }
+
+
+def _convert_amount(amount: float | int | None, source_currency: str | None, target_currency: str) -> float | None:
+    if amount is None or source_currency is None:
+        return None
+    if source_currency == target_currency:
+        return float(amount)
+    rates = _load_fx_rates()
+    if not rates or source_currency not in rates or target_currency not in rates:
+        return None
+    amount_chf = float(amount) * rates[source_currency]
+    return round(amount_chf / rates[target_currency], 2)
+
+
+def _chf_to_currency(amount_chf: float | int | None, target_currency: str) -> float | None:
+    if amount_chf is None:
+        return None
+    rates = _load_fx_rates()
+    if not rates or target_currency not in rates:
+        return None
+    return round(float(amount_chf) / rates[target_currency], 2)
+
+
+def _sum_prior_customer_spend_chf(
+    customer_id: str,
+    before: datetime,
+    period_days: int,
+) -> float | None:
+    """Approved customer purchases/refunds in the rolling period before this event."""
+    rows = _load_history_rows()
+    if rows is None:
+        return None
+
+    period_start = before - timedelta(days=period_days)
+    total = 0.0
+    for row in rows:
+        if row.get("customer_id") != customer_id or row.get("status") != "approved":
+            continue
+        if row.get("transaction_type") not in {"purchase", "refund"}:
+            continue
+        timestamp = datetime.fromisoformat(row["timestamp"].replace("Z", "+00:00"))
+        if period_start <= timestamp < before:
+            total += float(row["billing_amount_chf"])
+    return round(total, 2)
+
+
+def _name_tokens(value: str) -> set[str]:
+    stop_words = {"a", "an", "the", "pair", "of", "item", "product", "order"}
+
+    def stem(token: str) -> str:
+        if token.endswith("ies") and len(token) > 4:
+            return token[:-3] + "y"
+        if token.endswith("es") and len(token) > 4:
+            return token[:-2]
+        if token.endswith("s") and len(token) > 3:
+            return token[:-1]
+        return token
+
+    return {
+        stem(token)
+        for token in re.findall(r"[a-z0-9]+", value.casefold())
+        if token not in stop_words
+    }
+
+
+def _item_name_matches(expected: str, actual: str, details: str, category: str) -> bool:
+    expected_tokens = _name_tokens(expected)
+    category_tokens = _name_tokens(category.replace("_", " "))
+    if expected_tokens and (expected_tokens <= category_tokens or category_tokens <= expected_tokens):
+        return True
+    actual_tokens = _name_tokens(f"{actual} {details}")
+    return bool(expected_tokens) and expected_tokens <= actual_tokens
 
 
 def evaluate_purchase(policy, purchase: dict | None = None) -> DecisionResponse:
@@ -123,24 +218,24 @@ def evaluate_purchase(policy, purchase: dict | None = None) -> DecisionResponse:
             if code not in reason_codes:
                 reason_codes.append(code)
 
-    # Product category is the primary, fail-closed mandate check. It runs
-    # before price, merchant, order-term, session, or history checks. The first
-    # cart line that does not exactly match the confirmed category allowlist
-    # ends evaluation immediately with a decline.
-    allowed_categories = list(getattr(getattr(policy, "products", None), "allowed_categories", None) or [])
-    normalized_categories = {category.strip().casefold() for category in allowed_categories if category.strip()}
+    # Product category is the primary, fail-closed mandate check. New mandates
+    # preserve every requested object as an indexed item; legacy mandates keep
+    # the older global category allowlist behavior.
+    product_policy = getattr(policy, "products", None)
+    requested_items = list(getattr(product_policy, "items", None) or [])
+    allowed_categories = list(getattr(product_policy, "allowed_categories", None) or [])
     items = purchase.get("items") or []
-    if not normalized_categories or not items:
+    if not items or (not requested_items and not allowed_categories):
         record(
             field="authorization.items.item_category",
             operator="in",
-            expected=allowed_categories,
+            expected=[item.category for item in requested_items] or allowed_categories,
             actual=None,
             status="fail",
             source="authorization_event",
             message=(
-                "The confirmed mandate has no allowed product category."
-                if not normalized_categories
+                "The confirmed mandate has no requested product category."
+                if not requested_items and not allowed_categories
                 else "The authorization has no cart lines with product categories."
             ),
         )
@@ -151,32 +246,87 @@ def evaluate_purchase(policy, purchase: dict | None = None) -> DecisionResponse:
             evidence=evidence,
         )
 
-    for index, item in enumerate(items):
-        item_category = item.get("item_category")
-        matches = (
-            isinstance(item_category, str)
-            and item_category.strip().casefold() in normalized_categories
-        )
-        record(
-            field=f"authorization.items[{index}].item_category",
-            operator="in",
-            expected=allowed_categories,
-            actual=item_category,
-            status="pass" if matches else "fail",
-            source="authorization_event",
-            message=(
-                f"{item.get('item_name') or f'Item {index + 1}'} matches the confirmed {item_category} category."
-                if matches
-                else f"{item.get('item_name') or f'Item {index + 1}'} has category {item_category!r}, which is outside the confirmed mandate."
-            ),
-        )
-        if not matches:
-            return DecisionResponse(
-                authorization_id=purchase["authorization_id"],
-                decision="decline",
-                reason_codes=reason_codes,
-                evidence=evidence,
+    matched_requested_item_indexes: list[int] = []
+    if requested_items:
+        requested_categories = list(dict.fromkeys(item.category for item in requested_items))
+        for index, item in enumerate(items):
+            item_category = item.get("item_category")
+            category_matches = [
+                requested_index
+                for requested_index, requested_item in enumerate(requested_items)
+                if isinstance(item_category, str)
+                and item_category.strip().casefold() == requested_item.category.strip().casefold()
+            ]
+            matches = bool(category_matches)
+            record(
+                field=f"authorization.items[{index}].item_category",
+                operator="in",
+                expected=requested_categories,
+                actual=item_category,
+                status="pass" if matches else "fail",
+                source="authorization_event",
+                message=(
+                    f"{item.get('item_name') or f'Item {index + 1}'} matches the confirmed {item_category} category."
+                    if matches
+                    else f"{item.get('item_name') or f'Item {index + 1}'} has category {item_category!r}, which is outside the confirmed mandate."
+                ),
             )
+            if not matches:
+                return DecisionResponse(
+                    authorization_id=purchase["authorization_id"],
+                    decision="decline",
+                    reason_codes=reason_codes,
+                    evidence=evidence,
+                )
+
+            item_name = item.get("item_name") or ""
+            item_details = item.get("item_details") or ""
+            name_match = next(
+                (
+                    requested_index
+                    for requested_index in category_matches
+                    if _item_name_matches(
+                        requested_items[requested_index].name,
+                        item_name,
+                        item_details,
+                        requested_items[requested_index].category,
+                    )
+                ),
+                None,
+            )
+            # Preserve the category match so the later name check can explain
+            # a same-category but different product precisely.
+            matched_requested_item_indexes.append(
+                name_match if name_match is not None else category_matches[0]
+            )
+    else:
+        normalized_categories = {category.strip().casefold() for category in allowed_categories if category.strip()}
+        for index, item in enumerate(items):
+            item_category = item.get("item_category")
+            matches = (
+                isinstance(item_category, str)
+                and item_category.strip().casefold() in normalized_categories
+            )
+            record(
+                field=f"authorization.items[{index}].item_category",
+                operator="in",
+                expected=allowed_categories,
+                actual=item_category,
+                status="pass" if matches else "fail",
+                source="authorization_event",
+                message=(
+                    f"{item.get('item_name') or f'Item {index + 1}'} matches the confirmed {item_category} category."
+                    if matches
+                    else f"{item.get('item_name') or f'Item {index + 1}'} has category {item_category!r}, which is outside the confirmed mandate."
+                ),
+            )
+            if not matches:
+                return DecisionResponse(
+                    authorization_id=purchase["authorization_id"],
+                    decision="decline",
+                    reason_codes=reason_codes,
+                    evidence=evidence,
+                )
 
     # These are required event facts, independent of customer-configured rules.
     # A known-inactive authority/card is a definite rejection. Missing facts are
@@ -204,10 +354,132 @@ def evaluate_purchase(policy, purchase: dict | None = None) -> DecisionResponse:
             ),
         )
 
-    max_amount = policy.spending.per_item_purchase_price_max
+    max_amount = getattr(policy.spending, "per_item_purchase_price_max", None)
     policy_currency = getattr(policy.spending, "currency", "CHF")
     comparison_field = getattr(policy.spending, "comparison_field", "items")
-    if comparison_field == "billing_amount_chf":
+    if requested_items:
+        current_quantities: dict[int, int] = {}
+        quantity_unknown: set[int] = set()
+
+        for index, item in enumerate(items):
+            requested_index = matched_requested_item_indexes[index]
+            requested_item = requested_items[requested_index]
+            item_name = item.get("item_name") or ""
+            item_details = item.get("item_details") or ""
+            name_matches = _item_name_matches(
+                requested_item.name,
+                item_name,
+                item_details,
+                requested_item.category,
+            )
+            record(
+                field=f"authorization.items[{index}].item_name",
+                operator="matches",
+                expected=requested_item.name,
+                actual=item_name or None,
+                status="pass" if name_matches else "fail",
+                source="authorization_event",
+                message=(
+                    f"{item_name} matches the requested {requested_item.name}."
+                    if name_matches
+                    else f"{item_name or f'Item {index + 1}'} does not match the requested {requested_item.name}."
+                ),
+            )
+
+            actual_quantity = item.get("quantity")
+            if name_matches:
+                if isinstance(actual_quantity, int) and actual_quantity >= 1:
+                    current_quantities[requested_index] = (
+                        current_quantities.get(requested_index, 0) + actual_quantity
+                    )
+                else:
+                    quantity_unknown.add(requested_index)
+
+            if requested_item.max_price_per_item is None:
+                continue
+            item_price = item.get("unit_price")
+            item_currency = item.get("currency")
+            comparable_price = _convert_amount(item_price, item_currency, policy_currency)
+            price_status: CheckStatus = (
+                "unknown"
+                if comparable_price is None
+                else "pass"
+                if comparable_price <= requested_item.max_price_per_item
+                else "fail"
+            )
+            record(
+                field=f"authorization.items[{index}].unit_price",
+                operator="<=",
+                expected=requested_item.max_price_per_item,
+                actual=comparable_price,
+                status=price_status,
+                source="authorization_event+fx_rates",
+                message=(
+                    f"{item_name} costs {comparable_price:.2f} {policy_currency}, within the {requested_item.max_price_per_item:.2f} {policy_currency} item limit."
+                    if price_status == "pass"
+                    else f"{item_name} costs {comparable_price:.2f} {policy_currency}, above the {requested_item.max_price_per_item:.2f} {policy_currency} item limit."
+                    if price_status == "fail"
+                    else f"{item_name or f'Item {index + 1}'} cannot be converted to {policy_currency} for its item-price check."
+                ),
+            )
+
+        prior_quantities: dict[int, int] = {}
+        for prior_item in purchase.get("prior_approved_items") or []:
+            prior_category = prior_item.get("item_category")
+            if not isinstance(prior_category, str):
+                continue
+            prior_name = prior_item.get("item_name") or ""
+            prior_details = prior_item.get("item_details") or ""
+            requested_index = next(
+                (
+                    candidate_index
+                    for candidate_index, candidate in enumerate(requested_items)
+                    if prior_category.strip().casefold() == candidate.category.strip().casefold()
+                    and _item_name_matches(candidate.name, prior_name, prior_details, candidate.category)
+                ),
+                None,
+            )
+            if requested_index is None:
+                continue
+            prior_quantity = prior_item.get("quantity")
+            if isinstance(prior_quantity, int) and prior_quantity >= 1:
+                prior_quantities[requested_index] = (
+                    prior_quantities.get(requested_index, 0) + prior_quantity
+                )
+            else:
+                quantity_unknown.add(requested_index)
+
+        for requested_index in sorted(set(current_quantities) | quantity_unknown):
+            requested_item = requested_items[requested_index]
+            cumulative_quantity = None
+            if requested_index not in quantity_unknown:
+                cumulative_quantity = (
+                    prior_quantities.get(requested_index, 0)
+                    + current_quantities.get(requested_index, 0)
+                )
+            quantity_status: CheckStatus = (
+                "unknown"
+                if cumulative_quantity is None
+                else "pass"
+                if cumulative_quantity <= requested_item.quantity
+                else "fail"
+            )
+            record(
+                field=f"mandate.items[{requested_index}].purchased_quantity",
+                operator="<=",
+                expected=requested_item.quantity,
+                actual=cumulative_quantity,
+                status=quantity_status,
+                source="scenario_approved_purchases+authorization_event",
+                message=(
+                    f"This purchase brings {requested_item.name} to {cumulative_quantity} of {requested_item.quantity} allowed."
+                    if quantity_status == "pass"
+                    else f"This purchase would bring {requested_item.name} to {cumulative_quantity}, exceeding the {requested_item.quantity} allowed."
+                    if quantity_status == "fail"
+                    else f"The cumulative purchased quantity for {requested_item.name} cannot be calculated."
+                ),
+            )
+    elif comparison_field == "billing_amount_chf" and max_amount is not None:
         # Backward compatibility for already-created mandates that used the old
         # (incorrectly named) per-purchase billing-amount rule.
         amount = purchase.get("amount_chf")
@@ -227,7 +499,7 @@ def evaluate_purchase(policy, purchase: dict | None = None) -> DecisionResponse:
                 else f"Purchase amount CHF {amount:.2f} exceeds the CHF {max_amount:.2f} limit."
             ),
         )
-    else:
+    elif max_amount is not None:
         items = purchase.get("items")
         if not items:
             record(
@@ -263,6 +535,81 @@ def evaluate_purchase(policy, purchase: dict | None = None) -> DecisionResponse:
                         else f"{item_name} cannot be compared with the {policy_currency} limit without a matching price and currency conversion."
                     ),
                 )
+
+    total_price_max = getattr(policy.spending, "total_price_max", None)
+    period_days = getattr(policy.spending, "period_days", None)
+    if total_price_max is not None:
+        if period_days is None:
+            comparable_total = _convert_amount(
+                purchase.get("amount"),
+                purchase.get("currency"),
+                policy_currency,
+            )
+            if comparable_total is None:
+                comparable_total = _chf_to_currency(purchase.get("amount_chf"), policy_currency)
+            total_status: CheckStatus = (
+                "unknown"
+                if comparable_total is None
+                else "pass"
+                if comparable_total <= total_price_max
+                else "fail"
+            )
+            record(
+                field="authorization.amount",
+                operator="<=",
+                expected=total_price_max,
+                actual=comparable_total,
+                status=total_status,
+                source="authorization_event+fx_rates",
+                message=(
+                    f"Basket total {comparable_total:.2f} {policy_currency} is within the {total_price_max:.2f} {policy_currency} limit."
+                    if total_status == "pass"
+                    else f"Basket total {comparable_total:.2f} {policy_currency} exceeds the {total_price_max:.2f} {policy_currency} limit."
+                    if total_status == "fail"
+                    else f"The basket total cannot be converted to {policy_currency}."
+                ),
+            )
+        else:
+            timestamp_text = purchase.get("timestamp")
+            customer_id = purchase.get("customer_id")
+            scenario_spend_chf = purchase.get("scenario_approved_spend_chf")
+            current_amount_chf = purchase.get("amount_chf")
+            history_spend_chf: float | None = None
+            if isinstance(timestamp_text, str) and isinstance(customer_id, str):
+                before = datetime.fromisoformat(timestamp_text.replace("Z", "+00:00"))
+                history_spend_chf = _sum_prior_customer_spend_chf(customer_id, before, period_days)
+
+            comparable_total = None
+            if (
+                history_spend_chf is not None
+                and isinstance(scenario_spend_chf, (int, float))
+                and isinstance(current_amount_chf, (int, float))
+            ):
+                cumulative_chf = history_spend_chf + float(scenario_spend_chf) + float(current_amount_chf)
+                comparable_total = _chf_to_currency(cumulative_chf, policy_currency)
+
+            total_status = (
+                "unknown"
+                if comparable_total is None
+                else "pass"
+                if comparable_total <= total_price_max
+                else "fail"
+            )
+            record(
+                field="history.customer_approved_spend_plus_scenario_and_current",
+                operator="<=",
+                expected=total_price_max,
+                actual=comparable_total,
+                status=total_status,
+                source="authorization_history+scenario_context+authorization_event+fx_rates",
+                message=(
+                    f"Rolling {period_days}-day spend including this basket is {comparable_total:.2f} {policy_currency}, within the {total_price_max:.2f} {policy_currency} limit."
+                    if total_status == "pass"
+                    else f"Rolling {period_days}-day spend including this basket is {comparable_total:.2f} {policy_currency}, above the {total_price_max:.2f} {policy_currency} limit."
+                    if total_status == "fail"
+                    else f"The rolling {period_days}-day spend could not be calculated from customer history and scenario context."
+                ),
+            )
 
     merchant_policy = getattr(policy, "merchant", None)
     merchant_name = purchase.get("merchant_name")

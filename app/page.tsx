@@ -161,7 +161,7 @@ export default function LandingPage() {
             { name: "Yorian Melki", role: "Team lead" },
             { name: "Giannis Tsagkaropoulos", role: "Frontend" },
             { name: "Florian Gedeon", role: "Backend & security" },
-            { name: "Jafar Hack", role: "Mandate generation" },
+            { name: "Jafar Sadig", role: "Mandate generation" },
           ].map((member) => (
             <div key={member.name} className="text-center w-32">
               <div className="w-16 h-16 rounded-full mx-auto mb-3 bg-slate-800 text-white flex items-center justify-center text-lg font-bold">

@@ -191,6 +191,156 @@ def test_missing_mandate_category_declines_fail_closed():
     assert result.evidence[0].field == "authorization.items.item_category"
 
 
+def indexed_rules(*, total: float = 120, period_days: int | None = None, quantity: int = 1):
+    total_rule = {
+        "field": "authorization.amount",
+        "operator": "<=",
+        "value": total,
+        "currency": "CHF",
+        "scope": "period" if period_days is not None else "purchase",
+    }
+    if period_days is not None:
+        total_rule["period_days"] = period_days
+    return [
+        {"field": "authorization.items[0].item_name", "operator": "=", "value": "bread", "scope": "purchase"},
+        {"field": "authorization.items[0].item_category", "operator": "=", "value": "groceries", "scope": "purchase"},
+        {"field": "authorization.items[0].quantity", "operator": "<=", "value": quantity, "scope": "purchase"},
+        total_rule,
+    ]
+
+
+def indexed_purchase(**updates):
+    purchase = deepcopy(PURCHASE)
+    purchase.update({
+        "customer_id": "CU_TEST",
+        "merchant_id": "ME0029",
+        "amount": 50.0,
+        "currency": "CHF",
+        "amount_chf": 50.0,
+        "scenario_approved_spend_chf": 0.0,
+        "items": [
+            {
+                "item_name": "Bread",
+                "item_category": "groceries",
+                "quantity": 1,
+                "unit_price": 20.0,
+                "currency": "CHF",
+                "item_details": "Fresh bread",
+            }
+        ],
+    })
+    purchase.update(updates)
+    return purchase
+
+
+def test_total_basket_cap_does_not_require_an_item_price_cap():
+    policy = mandate_snapshot_to_engine_policy({"hard_rules": indexed_rules(total=60)})
+    assert evaluate_purchase(policy, indexed_purchase()).decision == "approve"
+    assert evaluate_purchase(policy, indexed_purchase(amount=61.0, amount_chf=61.0)).decision == "decline"
+
+
+def test_item_quantity_tracks_approved_units_not_basket_lines():
+    policy = mandate_snapshot_to_engine_policy({"hard_rules": indexed_rules(quantity=3)})
+    third_purchase = indexed_purchase(
+        prior_approved_items=[
+            {
+                "item_name": "Bread",
+                "item_category": "groceries",
+                "quantity": 1,
+                "item_details": "Fresh bread",
+            },
+            {
+                "item_name": "Bread",
+                "item_category": "groceries",
+                "quantity": 1,
+                "item_details": "Fresh bread",
+            },
+        ]
+    )
+    result = evaluate_purchase(policy, third_purchase)
+    assert result.decision == "approve"
+    quantity_evidence = next(
+        item for item in result.evidence
+        if item.field == "mandate.items[0].purchased_quantity"
+    )
+    assert quantity_evidence.actual == 3
+    assert quantity_evidence.expected == 3
+    assert not any(item.field == "authorization.items.length" for item in result.evidence)
+
+    fourth_purchase = indexed_purchase(
+        prior_approved_items=third_purchase["prior_approved_items"]
+        + [
+            {
+                "item_name": "Bread",
+                "item_category": "groceries",
+                "quantity": 1,
+                "item_details": "Fresh bread",
+            }
+        ]
+    )
+    result = evaluate_purchase(policy, fourth_purchase)
+    assert result.decision == "decline"
+    quantity_evidence = next(
+        item for item in result.evidence
+        if item.field == "mandate.items[0].purchased_quantity"
+    )
+    assert quantity_evidence.actual == 4
+
+
+def test_multiple_matching_basket_lines_are_aggregated():
+    policy = mandate_snapshot_to_engine_policy({"hard_rules": indexed_rules(quantity=2)})
+    purchase = indexed_purchase()
+    purchase["items"].append({
+        "item_name": "Bread loaf",
+        "item_category": "groceries",
+        "quantity": 1,
+        "unit_price": 10.0,
+        "currency": "CHF",
+        "item_details": "Fresh bread",
+    })
+    result = evaluate_purchase(policy, purchase)
+    assert result.decision == "approve"
+    quantity_evidence = next(
+        item for item in result.evidence
+        if item.field == "mandate.items[0].purchased_quantity"
+    )
+    assert quantity_evidence.actual == 2
+
+    extra_item = indexed_purchase()
+    extra_item["items"].append({
+        "item_name": "Gift card",
+        "item_category": "gift_card",
+        "quantity": 1,
+        "unit_price": 10.0,
+        "currency": "CHF",
+    })
+    result = evaluate_purchase(policy, extra_item)
+    assert result.decision == "decline"
+    assert result.evidence[-1].field == "authorization.items[1].item_category"
+
+
+def test_period_total_adds_scenario_and_current_spend():
+    policy = mandate_snapshot_to_engine_policy({"hard_rules": indexed_rules(total=100, period_days=30)})
+    result = evaluate_purchase(policy, indexed_purchase(scenario_approved_spend_chf=60.0))
+    assert result.decision == "decline"
+    period_evidence = next(
+        item for item in result.evidence
+        if item.field == "history.customer_approved_spend_plus_scenario_and_current"
+    )
+    assert period_evidence.actual == 110.0
+
+
+def test_period_total_includes_previous_customer_transactions():
+    policy = mandate_snapshot_to_engine_policy({"hard_rules": indexed_rules(total=100000, period_days=30)})
+    result = evaluate_purchase(policy, indexed_purchase(customer_id="CU0001"))
+    period_evidence = next(
+        item for item in result.evidence
+        if item.field == "history.customer_approved_spend_plus_scenario_and_current"
+    )
+    assert isinstance(period_evidence.actual, float)
+    assert period_evidence.actual > 50.0
+
+
 if __name__ == "__main__":
     test_all_event_local_rules_pass()
     test_item_over_limit_declines()
@@ -205,4 +355,9 @@ if __name__ == "__main__":
     test_inactive_card_declines()
     test_product_category_mismatch_declines_immediately()
     test_missing_mandate_category_declines_fail_closed()
+    test_total_basket_cap_does_not_require_an_item_price_cap()
+    test_item_quantity_tracks_approved_units_not_basket_lines()
+    test_multiple_matching_basket_lines_are_aggregated()
+    test_period_total_adds_scenario_and_current_spend()
+    test_period_total_includes_previous_customer_transactions()
     print("DECISION ENGINE TESTS PASSED")

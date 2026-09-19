@@ -3,7 +3,13 @@ from __future__ import annotations
 
 import time
 
-from scenario_jobs import confirm_and_start_job, get_job, policy_to_hard_rules, prepare_job
+from scenario_jobs import (
+    _approved_scenario_items,
+    confirm_and_start_job,
+    get_job,
+    policy_to_hard_rules,
+    prepare_job,
+)
 
 
 class FakeLeashClient:
@@ -73,14 +79,21 @@ class FakeLeashClient:
                     "card_status_at_attempt": "active",
                     "initiator_type": "agent",
                     "purchase_description": "Groceries",
-                    "items": [{"item_name": "Bread", "item_category": "groceries", "unit_price": 5.0, "currency": "CHF"}],
+                    "items": [{"item_name": "Bread", "item_category": "groceries", "quantity": 1, "unit_price": 5.0, "currency": "CHF", "item_details": "Fresh bread"}],
+                    "order_returnable": "true",
+                    "order_cancellable": "unknown",
                 },
                 "mandate": {
+                    "customer_id": "CU0001",
                     "hard_rules": [
-                        {"field": "authorization.items.item_category", "operator": "in", "value": ["groceries"], "scope": "purchase"},
-                        {"field": "authorization.billing_amount_chf", "operator": "<=", "value": 100, "scope": "purchase"},
+                        {"field": "authorization.items[0].item_name", "operator": "=", "value": "bread", "scope": "purchase"},
+                        {"field": "authorization.items[0].item_category", "operator": "=", "value": "groceries", "scope": "purchase"},
+                        {"field": "authorization.items[0].quantity", "operator": "<=", "value": 1, "scope": "purchase"},
+                        {"field": "authorization.items[0].unit_price", "operator": "<=", "value": 100, "currency": "CHF", "scope": "purchase"},
+                        {"field": "authorization.amount", "operator": "<=", "value": 500, "currency": "CHF", "scope": "purchase"},
                     ]
                 },
+                "context": {"approved_spend_in_period_chf": 0.0},
             },
         }
 
@@ -92,52 +105,53 @@ class FakeLeashClient:
 
 POLICY = {
     "raw_instructions": "Allow purchases up to CHF 100.",
-    "products": {"allowed_categories": ["groceries"]},
-    "spending": {"per_item_purchase_price_max": 100, "currency": "CHF"},
+    "products": {
+        "items": [
+            {"name": "bread", "category": "groceries", "quantity": 1, "max_price_per_item": 100},
+        ]
+    },
+    "spending": {
+        "total_price_max": 500,
+        "currency": "CHF",
+        "period_in_days": None,
+    },
     "merchant": {"blocklist": [], "allowlist": []},
+    "order_terms": {"require_returnable": True, "require_cancellable": True},
 }
 
 
 def test_policy_to_hard_rules():
     assert policy_to_hard_rules(POLICY) == [
         {
-            "field": "authorization.items.item_category",
-            "operator": "in",
-            "value": ["groceries"],
+            "field": "authorization.items[0].item_name",
+            "operator": "=",
+            "value": "bread",
             "scope": "purchase",
         },
         {
-            "field": "authorization.items.unit_price",
+            "field": "authorization.items[0].item_category",
+            "operator": "=",
+            "value": "groceries",
+            "scope": "purchase",
+        },
+        {
+            "field": "authorization.items[0].quantity",
+            "operator": "<=",
+            "value": 1,
+            "scope": "purchase",
+        },
+        {
+            "field": "authorization.items[0].unit_price",
             "operator": "<=",
             "value": 100,
             "currency": "CHF",
             "scope": "purchase",
-        }
-    ]
-
-
-def test_policy_to_all_event_local_rules():
-    policy = {
-        **POLICY,
-        "merchant": {
-            **POLICY["merchant"],
-            "blocklist": ["Blocked Shop"],
-            "allowlist": ["Alpine Basket"],
-        },
-        "order_terms": {"require_returnable": True, "require_cancellable": True},
-        "session": {"max_recent_attempts_10m": 3},
-    }
-    assert policy_to_hard_rules(policy)[2:] == [
-        {
-            "field": "authorization.merchant",
-            "operator": "not_in",
-            "value": ["Blocked Shop"],
-            "scope": "purchase",
         },
         {
-            "field": "authorization.merchant",
-            "operator": "in",
-            "value": ["Alpine Basket"],
+            "field": "authorization.amount",
+            "operator": "<=",
+            "value": 500,
+            "currency": "CHF",
             "scope": "purchase",
         },
         {
@@ -152,13 +166,98 @@ def test_policy_to_all_event_local_rules():
             "value": "true",
             "scope": "purchase",
         },
+    ]
+
+
+def test_approved_scenario_items_uses_only_final_approved_purchases():
+    job = {
+        "scenarios": [
+            {
+                "scenario_id": "SCEN0000",
+                "results": [
+                    {
+                        "final_decision": "approve",
+                        "purchase": {
+                            "items": [
+                                {
+                                    "name": "Trail-running shoes",
+                                    "category": "sporting_goods",
+                                    "quantity": 1,
+                                    "unit_price": 120,
+                                    "currency": "CHF",
+                                    "details": "Shoes",
+                                }
+                            ]
+                        },
+                    },
+                    {
+                        "final_decision": "decline",
+                        "purchase": {
+                            "items": [
+                                {
+                                    "name": "Trail-running shoes",
+                                    "category": "sporting_goods",
+                                    "quantity": 5,
+                                }
+                            ]
+                        },
+                    },
+                ],
+            }
+        ]
+    }
+    assert _approved_scenario_items(job, "SCEN0000") == [
         {
-            "field": "authorization.recent_attempt_count_10m",
-            "operator": "<",
-            "value": 3,
+            "item_name": "Trail-running shoes",
+            "item_category": "sporting_goods",
+            "quantity": 1,
+            "unit_price": 120,
+            "currency": "CHF",
+            "item_details": "Shoes",
+        }
+    ]
+
+
+def test_policy_to_all_event_local_rules():
+    policy = {
+        **POLICY,
+        "merchant": {
+            **POLICY["merchant"],
+            "blocklist": ["Blocked Shop"],
+            "allowlist": ["Alpine Basket"],
+        },
+    }
+    merchant_rules = [rule for rule in policy_to_hard_rules(policy) if rule["field"] == "authorization.merchant"]
+    assert merchant_rules == [
+        {
+            "field": "authorization.merchant",
+            "operator": "not_in",
+            "value": ["Blocked Shop"],
+            "scope": "purchase",
+        },
+        {
+            "field": "authorization.merchant",
+            "operator": "in",
+            "value": ["Alpine Basket"],
             "scope": "purchase",
         },
     ]
+
+
+def test_period_rule_is_optional_and_compiled_only_when_present():
+    policy = {
+        **POLICY,
+        "spending": {**POLICY["spending"], "period_in_days": 30},
+    }
+    total_rule = next(rule for rule in policy_to_hard_rules(policy) if rule["field"] == "authorization.amount")
+    assert total_rule == {
+        "field": "authorization.amount",
+        "operator": "<=",
+        "value": 500,
+        "currency": "CHF",
+        "scope": "period",
+        "period_days": 30,
+    }
 
 
 def test_complete_workflow_sequence():
@@ -198,6 +297,8 @@ def test_complete_workflow_sequence():
 
 if __name__ == "__main__":
     test_policy_to_hard_rules()
+    test_approved_scenario_items_uses_only_final_approved_purchases()
     test_policy_to_all_event_local_rules()
+    test_period_rule_is_optional_and_compiled_only_when_present()
     test_complete_workflow_sequence()
     print("SCENARIO JOB WORKFLOW TESTS PASSED")

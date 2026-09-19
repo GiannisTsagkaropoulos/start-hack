@@ -3,13 +3,19 @@ from pathlib import Path
 from typing import Any, Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 import openai
 from dotenv import load_dotenv
 
 import decision_engine
 from decision_engine import DecisionResponse
 from leash_client import LeashApiError
+from policy_items import merge_duplicate_items
+from policy_prompt import (
+    build_policy_extraction_messages,
+    detect_explicit_currency,
+    detect_explicit_period_days,
+)
 from scenario_jobs import confirm_and_start_job, get_job, prepare_job, resolve_authorization
 
 
@@ -39,14 +45,20 @@ ProductCategory = Literal[
 
 # --- Strict Schemas (For Final Confirmation) ---
 class Spending(BaseModel):
-    per_item_purchase_price_max: float = Field(gt=0)
-    per_period_purchase_price_max: float | None = Field(default=None, gt=0)
+    total_price_max: float | None = Field(default=None, gt=0)
     currency: Currency
     period_in_days: int | None = Field(default=None, gt=0)
 
 
+class ProductItem(BaseModel):
+    name: str = Field(min_length=1)
+    category: ProductCategory
+    quantity: int = Field(ge=1)
+    max_price_per_item: float | None = Field(default=None, gt=0)
+
+
 class Products(BaseModel):
-    allowed_categories: list[ProductCategory] = Field(min_length=1)
+    items: list[ProductItem] = Field(min_length=1)
 
 
 class Merchant(BaseModel):
@@ -55,18 +67,8 @@ class Merchant(BaseModel):
 
 
 class OrderTerms(BaseModel):
-    require_returnable: bool | None = None
-    require_cancellable: bool | None = None
-
-
-class Session(BaseModel):
-    max_recent_attempts_10m: int | None = Field(default=None, ge=0)
-    trusted_devices_only: bool = True
-    domestic_only: bool | None = None
-
-
-class DuplicateCheck(BaseModel):
-    block_repeats_within_minutes: int | None = Field(default=None, ge=0)
+    require_returnable: bool = True
+    require_cancellable: bool = True
 
 
 class Schema(BaseModel):
@@ -75,21 +77,34 @@ class Schema(BaseModel):
     spending: Spending
     merchant: Merchant
     order_terms: OrderTerms
-    session: Session
-    duplicate_check: DuplicateCheck
     notes_for_customer: str = ""
+
+    @model_validator(mode="after")
+    def validate_spending_controls(self) -> "Schema":
+        has_item_limit = any(item.max_price_per_item is not None for item in self.products.items)
+        if self.spending.total_price_max is None and not has_item_limit:
+            raise ValueError("Provide a total-price limit or at least one item-price limit.")
+        if self.spending.period_in_days is not None and self.spending.total_price_max is None:
+            raise ValueError("A period can only be used with a total-price limit.")
+        return self
 
 
 # --- Draft Schemas (For LLM Extraction) ---
 class DraftSpending(BaseModel):
-    per_item_purchase_price_max: float | None = None
-    per_period_purchase_price_max: float | None = None
+    total_price_max: float | None = None
     currency: Currency | None = None
     period_in_days: int | None = None
 
 
+class DraftProductItem(BaseModel):
+    name: str | None = None
+    category: ProductCategory | None = None
+    quantity: int | None = None
+    max_price_per_item: float | None = None
+
+
 class DraftProducts(BaseModel):
-    allowed_categories: list[ProductCategory] | None = None
+    items: list[DraftProductItem] | None = None
 
 
 class DraftMerchant(BaseModel):
@@ -102,24 +117,12 @@ class DraftOrderTerms(BaseModel):
     require_cancellable: bool | None = None
 
 
-class DraftSession(BaseModel):
-    max_recent_attempts_10m: int | None = None
-    trusted_devices_only: bool | None = None
-    domestic_only: bool | None = None
-
-
-class DraftDuplicateCheck(BaseModel):
-    block_repeats_within_minutes: int | None = None
-
-
 class DraftSchema(BaseModel):
     raw_instructions: str
     products: DraftProducts
     spending: DraftSpending
     merchant: DraftMerchant
     order_terms: DraftOrderTerms
-    session: DraftSession
-    duplicate_check: DraftDuplicateCheck
     notes_for_customer: str | None = ""
 
 
@@ -195,116 +198,56 @@ def identify() -> dict[str, str]:
 
 
 def parse_with_llm(text: str) -> DraftSchema:
-    
     client = openai.OpenAI(
         base_url="http://localhost:11434/v1",
         api_key="ollama",  # Ollama requires a string here, but ignores the value
     )
-    
-    prompt = f"""
-    You are an AI assistant configuring a secure wallet policy for an AI shopping agent.
-    Extract the rules, limits, and preferences from the user's natural language input.
-    If a value is not mentioned or cannot be confidently inferred, output null for it.
-
-    User Input: "{text}"
-
-    Product category is the primary authorization rule. Derive one or more
-    allowed product categories from the requested product in the user's text.
-    Use only these exact values:
-    books, clothing, cosmetics, dining, electronics, food_delivery, fuel,
-    gift_card, groceries, home_improvement, hotel, household, membership,
-    sporting_goods, subscriptions, transport.
-
-    Examples: running shoes -> sporting_goods; groceries or food ingredients
-    -> groceries; restaurant meal -> dining; delivered prepared meal ->
-    food_delivery. Do not use a merchant category as a substitute for the
-    requested product category. If no product can be identified, output null
-    for products.allowed_categories so the customer must choose it.
-
-    Output in JSON format a FinalSchema:
-
-    class Products(BaseModel):
-    allowed_categories: list[ProductCategory]
-
-    class Spending(BaseModel):
-    per_item_purchase_price_max: float = Field(gt=0)
-    per_period_purchase_price_max: float | None = Field(default=None, gt=0)
-    currency: Currency
-    period_in_days: int | None = Field(default=None, gt=0)
-
-class Merchant(BaseModel):
-    blocklist: list[str] = Field(default_factory=list)
-    allowlist: list[str] = Field(default_factory=list)
-
-class OrderTerms(BaseModel):
-    require_returnable: bool | None
-    require_cancellable: bool | None
-
-class Session(BaseModel):
-    max_recent_attempts_10m: int | None = Field(default=None, ge=0)
-    trusted_devices_only: bool
-    domestic_only: bool | None
-
-class DuplicateCheck(BaseModel):
-    block_repeats_within_minutes: int | None = Field(default=None, ge=0)
-
-class FinalSchema(BaseModel):
-    raw_instructions: str = Field(min_length=1)
-    products: Products
-    spending: Spending
-    merchant: Merchant
-    order_terms: OrderTerms
-    session: Session
-    duplicate_check: DuplicateCheck
-    notes_for_customer: str = ""
-    """
-    
 
     completion = client.beta.chat.completions.parse(
         model="llama3.2",  # Ensure this matches the model you pulled in Ollama
-        messages=[{"role": "user", "content": prompt}],
+        messages=build_policy_extraction_messages(text),
         response_format=DraftSchema,
+        temperature=0,
     )
-    return completion.choices[0].message.parsed
+    parsed = completion.choices[0].message.parsed
+    if parsed is None:
+        raise ValueError("The local model did not return a parsed wallet policy.")
+
+    # Currency is cheap and safer to verify deterministically. This guarantees
+    # that an omitted currency stays null and common spellings such as
+    # "francs" and "franks" become CHF even if the model guesses otherwise.
+    parsed.spending.currency = detect_explicit_currency(text)
+    parsed.spending.period_in_days = detect_explicit_period_days(text)
+    return parsed
 
 
 def check_missing_fields(draft: dict[str, Any]) -> list[str]:
     missing = []
 
-    # Product category is mandatory because it is the first authorization
-    # check and every cart line must match it.
+    # Every requested object is kept separately so category, quantity, and an
+    # optional unit-price ceiling can be checked against the matching cart line.
     products = draft.get("products", {})
-    if not products.get("allowed_categories"):
-        missing.append("products.allowed_categories")
+    items = products.get("items") or []
+    if not items:
+        missing.append("products.items")
+    for index, item in enumerate(items):
+        if not item.get("name"):
+            missing.append(f"products.items.{index}.name")
+        if not item.get("category"):
+            missing.append(f"products.items.{index}.category")
+        if item.get("quantity") is None:
+            missing.append(f"products.items.{index}.quantity")
 
-    # Spending
+    # At least one monetary ceiling is required, but it can be either a shared
+    # basket/period total or one or more item-level limits.
     spending = draft.get("spending", {})
-    if spending.get("per_item_purchase_price_max") is None:
-        missing.append("spending.per_item_purchase_price_max")
+    has_item_limit = any(item.get("max_price_per_item") is not None for item in items)
+    if spending.get("total_price_max") is None and not has_item_limit:
+        missing.append("spending.total_price_max_or_item_limit")
     if spending.get("currency") is None:
         missing.append("spending.currency")
-    if spending.get("per_period_purchase_price_max") is None:
-        missing.append("spending.per_period_purchase_price_max")
-    if spending.get("period_in_days") is None:
-        missing.append("spending.period_in_days")
-
-    # Order Terms
-    order_terms = draft.get("order_terms", {})
-    if order_terms.get("require_returnable") is None:
-        missing.append("order_terms.require_returnable")
-    # Session
-    session = draft.get("session", {})
-    if session.get("trusted_devices_only") is None:
-        missing.append("session.trusted_devices_only")
-    if session.get("domestic_only") is None:
-        missing.append("session.domestic_only")
-    if session.get("max_recent_attempts_10m") is None:
-        missing.append("session.max_recent_attempts_10m")
-
-    # Duplicate Check
-    duplicate_check = draft.get("duplicate_check", {})
-    if duplicate_check.get("block_repeats_within_minutes") is None:
-        missing.append("duplicate_check.block_repeats_within_minutes")
+    if spending.get("period_in_days") is not None and spending.get("total_price_max") is None:
+        missing.append("spending.total_price_max")
 
     return missing
 
@@ -319,6 +262,13 @@ def parse_policy(request: PolicyRequest) -> PolicyResponse:
     parsed_draft = parse_with_llm(combined_text)
     
     draft_dict = parsed_draft.model_dump()
+    products = draft_dict.setdefault("products", {})
+    products["items"] = merge_duplicate_items(products.get("items") or []) or None
+    order_terms = draft_dict.setdefault("order_terms", {})
+    if order_terms.get("require_returnable") is None:
+        order_terms["require_returnable"] = True
+    if order_terms.get("require_cancellable") is None:
+        order_terms["require_cancellable"] = True
 
     # PRINT TO TERMINAL
     print("\n=================== LLM PARSED OUTPUT ===================")

@@ -40,9 +40,14 @@ def test_authorization_event_to_purchase():
     purchase = authorization_event_to_purchase(event_data)
     assert purchase == {
         "authorization_id": "LA_6bcd4067e93b4f25",
+        "source_authorization_id": "AU0001",
+        "customer_id": None,
         "card_id": "CA0001",
         "merchant_id": "ME0001",
+        "amount": None,
+        "currency": None,
         "amount_chf": 20.0,
+        "scenario_approved_spend_chf": None,
         "timestamp": "2026-08-09T10:04:00Z",
         "items": [],
         "merchant_name": None,
@@ -54,6 +59,42 @@ def test_authorization_event_to_purchase():
         "card_status_at_attempt": None,
         "initiator_type": None,
     }
+
+
+def test_indexed_items_and_period_total_are_reconstructed():
+    mandate = {
+        "hard_rules": [
+            {"field": "authorization.items[0].item_name", "operator": "=", "value": "book", "scope": "purchase"},
+            {"field": "authorization.items[0].item_category", "operator": "=", "value": "books", "scope": "purchase"},
+            {"field": "authorization.items[0].quantity", "operator": "<=", "value": 2, "scope": "purchase"},
+            {"field": "authorization.items[1].item_name", "operator": "=", "value": "monitor", "scope": "purchase"},
+            {"field": "authorization.items[1].item_category", "operator": "=", "value": "electronics", "scope": "purchase"},
+            {"field": "authorization.items[1].quantity", "operator": "<=", "value": 1, "scope": "purchase"},
+            {"field": "authorization.items[1].unit_price", "operator": "<=", "value": 300, "currency": "CHF", "scope": "purchase"},
+            {"field": "authorization.amount", "operator": "<=", "value": 500, "currency": "CHF", "scope": "period", "period_days": 30},
+        ]
+    }
+    policy = mandate_snapshot_to_engine_policy(mandate)
+    assert [(item.name, item.category, item.quantity, item.max_price_per_item) for item in policy.products.items] == [
+        ("book", "books", 2, None),
+        ("monitor", "electronics", 1, 300.0),
+    ]
+    assert policy.spending.total_price_max == 500.0
+    assert policy.spending.period_days == 30
+
+
+def test_period_total_without_period_days_is_rejected():
+    mandate = {
+        "hard_rules": [
+            {"field": "authorization.items.item_category", "operator": "in", "value": ["books"], "scope": "purchase"},
+            {"field": "authorization.amount", "operator": "<=", "value": 100, "currency": "CHF", "scope": "period"},
+        ]
+    }
+    try:
+        mandate_snapshot_to_engine_policy(mandate)
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
 
 
 def test_end_to_end_conversion_feeds_existing_engine_unchanged():
@@ -90,5 +131,7 @@ if __name__ == "__main__":
     test_mandate_snapshot_amount_only()
     test_mandate_snapshot_no_amount_rule_raises()
     test_authorization_event_to_purchase()
+    test_indexed_items_and_period_total_are_reconstructed()
+    test_period_total_without_period_days_is_rejected()
     test_end_to_end_conversion_feeds_existing_engine_unchanged()
     print("ALL ADAPTER UNIT TESTS PASSED")

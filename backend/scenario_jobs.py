@@ -24,6 +24,7 @@ from leash_adapter import (
 )
 from leash_client import LeashClient
 from leash_ledger import LeashLedger
+from policy_items import merge_duplicate_items
 
 
 ClientFactory = Callable[[], LeashClient]
@@ -56,24 +57,61 @@ def policy_to_hard_rules(policy: dict[str, Any]) -> list[dict[str, Any]]:
     spending = policy["spending"]
     merchant = policy["merchant"]
     currency = spending["currency"]
-    allowed_categories = policy["products"]["allowed_categories"]
-    if not allowed_categories:
-        raise ValueError("At least one allowed product category is required.")
-    rules: list[dict[str, Any]] = [
-        {
-            "field": "authorization.items.item_category",
-            "operator": "in",
-            "value": allowed_categories,
-            "scope": "purchase",
-        },
-        {
-            "field": "authorization.items.unit_price",
+    requested_items = merge_duplicate_items(policy["products"]["items"])
+    if not requested_items:
+        raise ValueError("At least one requested item is required.")
+
+    rules: list[dict[str, Any]] = []
+    for index, item in enumerate(requested_items):
+        rules.extend(
+            [
+                {
+                    "field": f"authorization.items[{index}].item_name",
+                    "operator": "=",
+                    "value": item["name"],
+                    "scope": "purchase",
+                },
+                {
+                    "field": f"authorization.items[{index}].item_category",
+                    "operator": "=",
+                    "value": item["category"],
+                    "scope": "purchase",
+                },
+                {
+                    "field": f"authorization.items[{index}].quantity",
+                    "operator": "<=",
+                    "value": item["quantity"],
+                    "scope": "purchase",
+                },
+            ]
+        )
+        if item.get("max_price_per_item") is not None:
+            rules.append(
+                {
+                    "field": f"authorization.items[{index}].unit_price",
+                    "operator": "<=",
+                    "value": item["max_price_per_item"],
+                    "currency": currency,
+                    "scope": "purchase",
+                }
+            )
+
+    total_price_max = spending.get("total_price_max")
+    period_days = spending.get("period_in_days")
+    if total_price_max is not None:
+        total_rule: dict[str, Any] = {
+            "field": "authorization.amount",
             "operator": "<=",
-            "value": spending["per_item_purchase_price_max"],
+            "value": total_price_max,
             "currency": currency,
-            "scope": "purchase",
+            "scope": "period" if period_days is not None else "purchase",
         }
-    ]
+        if period_days is not None:
+            total_rule["period_days"] = period_days
+        rules.append(total_rule)
+    elif not any(item.get("max_price_per_item") is not None for item in requested_items):
+        raise ValueError("Provide a total-price limit or at least one item-price limit.")
+
     blocklist = merchant.get("blocklist") or []
     if blocklist:
         rules.append({"field": "authorization.merchant", "operator": "not_in", "value": blocklist, "scope": "purchase"})
@@ -88,11 +126,6 @@ def policy_to_hard_rules(policy: dict[str, Any]) -> list[dict[str, Any]]:
     if order_terms.get("require_cancellable"):
         rules.append({"field": "authorization.order_cancellable", "operator": "=", "value": "true", "scope": "purchase"})
 
-    max_attempts = policy.get("session", {}).get("max_recent_attempts_10m")
-    if max_attempts is not None:
-        # The event contains the number of earlier attempts. Using '< max'
-        # means the current attempt remains within a total-attempt cap of max.
-        rules.append({"field": "authorization.recent_attempt_count_10m", "operator": "<", "value": max_attempts, "scope": "purchase"})
     return rules
 
 
@@ -306,6 +339,11 @@ def _run_one_scenario(job_id: str, mandate_id: str, scenario_id: str, client: Le
         mandate_snapshot = event_data["mandate"]
         policy = mandate_snapshot_to_engine_policy(mandate_snapshot)
         purchase = authorization_event_to_purchase(event_data)
+        with _jobs_lock:
+            purchase["prior_approved_items"] = _approved_scenario_items(
+                _require_job(job_id),
+                scenario_id,
+            )
         started = time.monotonic()
         engine_result = evaluate_purchase(policy, purchase)
         decision, reason_codes, customer_message, evidence = engine_decision_to_leash_decision(engine_result)
@@ -357,13 +395,36 @@ def _purchase_summary(event_data: dict[str, Any]) -> dict[str, Any]:
         "items": [
             {
                 "name": item.get("item_name"),
+                "category": item.get("item_category"),
                 "quantity": item.get("quantity"),
                 "unit_price": item.get("unit_price"),
                 "currency": item.get("currency"),
+                "details": item.get("item_details"),
             }
             for item in authorization.get("items", [])
         ],
     }
+
+
+def _approved_scenario_items(job: dict[str, Any], scenario_id: str) -> list[dict[str, Any]]:
+    """Return actual item quantities from purchases finalized as approved."""
+    approved_items: list[dict[str, Any]] = []
+    scenario = _find_scenario(job, scenario_id)
+    for result in scenario["results"]:
+        if result.get("final_decision") != "approve":
+            continue
+        for item in result.get("purchase", {}).get("items", []):
+            approved_items.append(
+                {
+                    "item_name": item.get("name"),
+                    "item_category": item.get("category"),
+                    "quantity": item.get("quantity"),
+                    "unit_price": item.get("unit_price"),
+                    "currency": item.get("currency"),
+                    "item_details": item.get("details") or "",
+                }
+            )
+    return approved_items
 
 
 def _display_decision(result: dict[str, Any]) -> str:
