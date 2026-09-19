@@ -26,7 +26,7 @@ class DecisionResponse(BaseModel):
     decision: Literal["approve", "decline", "step_up"]
     reason_codes: list[ReasonCode]
     evidence: list[DecisionEvidence]
-    engine_version: str = "rule-classifier-v3"
+    engine_version: str = "rule-classifier-v5"
 
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
@@ -73,16 +73,15 @@ def get_purchase_to_evaluate() -> dict:
     return DEMO_PURCHASE
 
 
-def _count_prior_approved_merchant_purchases(card_id: str, merchant_id: str, before: datetime) -> int | None:
+def _count_prior_merchant_transactions(merchant_id: str, before: datetime) -> int | None:
+    """Count earlier transactions for this merchant across every user/card."""
     if not os.path.exists(_HISTORY_CSV):
         return None
 
     count = 0
     with open(_HISTORY_CSV, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
-            if row["card_id"] != card_id or row["merchant_id"] != merchant_id:
-                continue
-            if row["status"] != "approved":
+            if row["merchant_id"] != merchant_id:
                 continue
             if datetime.fromisoformat(row["timestamp"].replace("Z", "+00:00")) < before:
                 count += 1
@@ -326,6 +325,17 @@ def evaluate_purchase(policy, purchase: dict | None = None) -> DecisionResponse:
         if not getattr(order_terms, policy_field, False):
             continue
         actual = purchase.get(purchase_field)
+        if purchase_field == "order_cancellable":
+            is_subscription = any(
+                str(item.get("item_category", "")).strip().casefold() == "subscriptions"
+                for item in items
+            )
+            if not is_subscription:
+                # Cancellability is a subscription-only check. Some
+                # non-subscription fixtures use the literal "unknown" rather
+                # than omitting the field, so gate on product category instead
+                # of the field's presence alone.
+                continue
         status = "pass" if actual == "true" else "unknown" if actual in (None, "unknown") else "fail"
         record(
             field=f"authorization.{purchase_field}",
@@ -365,32 +375,32 @@ def evaluate_purchase(policy, purchase: dict | None = None) -> DecisionResponse:
             ),
         )
 
-    if merchant_policy and merchant_policy.familiarity_required:
-        before = datetime.fromisoformat(purchase["timestamp"].replace("Z", "+00:00"))
-        prior_count = _count_prior_approved_merchant_purchases(purchase["card_id"], purchase["merchant_id"], before)
-        expected = max(1, policy.merchant.familiarity_min_prior_approved or 1)
-
-        status: CheckStatus
-        if prior_count is None:
-            status = "unknown"
-            message = "No reliable value is available for merchant purchase history."
-        elif prior_count >= expected:
-            status = "pass"
-            message = f"{prior_count} earlier approved purchases with this merchant meet the familiarity requirement."
-        else:
-            status = "fail"
-            message = f"Only {prior_count} earlier approved purchases with this merchant; {expected} required."
-
-        record(
-            rule_type="soft",
-            field="history.approved_merchant_transaction_count",
-            operator=">=",
-            expected=expected,
-            actual=prior_count,
-            status=status,
-            source="authorization_history",
-            message=message,
+    before = datetime.fromisoformat(purchase["timestamp"].replace("Z", "+00:00"))
+    prior_count = _count_prior_merchant_transactions(purchase["merchant_id"], before)
+    merchant_history_status: CheckStatus
+    if prior_count is None:
+        merchant_history_status = "unknown"
+        merchant_history_message = "Merchant transaction history is unavailable; customer approval is required."
+    elif prior_count >= 3:
+        merchant_history_status = "pass"
+        merchant_history_message = f"The merchant has {prior_count} earlier transactions across all users."
+    else:
+        merchant_history_status = "fail"
+        merchant_history_message = (
+            f"The merchant has only {prior_count} earlier transactions across all users; "
+            "customer approval is required."
         )
+
+    record(
+        rule_type="soft",
+        field="history.all_user_merchant_transaction_count",
+        operator=">=",
+        expected=3,
+        actual=prior_count,
+        status=merchant_history_status,
+        source="authorization_history",
+        message=merchant_history_message,
+    )
 
     if any(e.rule_type == "hard" and e.status == "fail" for e in evidence):
         decision: Literal["approve", "decline", "step_up"] = "decline"

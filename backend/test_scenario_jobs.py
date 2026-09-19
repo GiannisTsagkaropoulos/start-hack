@@ -94,7 +94,7 @@ POLICY = {
     "raw_instructions": "Allow purchases up to CHF 100.",
     "products": {"allowed_categories": ["groceries"]},
     "spending": {"per_item_purchase_price_max": 100, "currency": "CHF"},
-    "merchant": {"familiarity_required": False, "familiarity_min_prior_approved": 0},
+    "merchant": {"blocklist": [], "allowlist": []},
 }
 
 

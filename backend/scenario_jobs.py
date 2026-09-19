@@ -74,16 +74,6 @@ def policy_to_hard_rules(policy: dict[str, Any]) -> list[dict[str, Any]]:
             "scope": "purchase",
         }
     ]
-    if merchant.get("familiarity_required"):
-        rules.append(
-            {
-                "field": "history.approved_merchant_transaction_count",
-                "operator": ">=",
-                "value": max(1, merchant.get("familiarity_min_prior_approved") or 1),
-                "scope": "purchase",
-            }
-        )
-
     blocklist = merchant.get("blocklist") or []
     if blocklist:
         rules.append({"field": "authorization.merchant", "operator": "not_in", "value": blocklist, "scope": "purchase"})

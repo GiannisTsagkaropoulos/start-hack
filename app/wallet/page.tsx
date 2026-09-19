@@ -10,7 +10,6 @@ import {
   Check,
   CheckCircle2,
   ShieldCheck,
-  Sparkles,
 } from "lucide-react";
 import {
   ParsePolicyResponse,
@@ -35,8 +34,6 @@ function toWalletPolicy(draft: ParsedPolicyDraft): WalletPolicy {
       period_in_days: draft.spending.period_in_days,
     },
     merchant: {
-      familiarity_required: draft.merchant.familiarity_required,
-      familiarity_min_prior_approved: draft.merchant.familiarity_min_prior_approved ?? 0,
       blocklist: draft.merchant.blocklist ?? [],
       allowlist: draft.merchant.allowlist ?? [],
     },
@@ -58,9 +55,10 @@ function toWalletPolicy(draft: ParsedPolicyDraft): WalletPolicy {
   };
 }
 
-type Step = "select" | "describe" | "review" | "confirm";
+type Step = "describe" | "review" | "confirm";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const WALLET_ID = 0;
 
 const PRODUCT_CATEGORIES: { label: string; value: ProductCategory }[] = [
   { label: "Books", value: "books" },
@@ -85,9 +83,7 @@ const requiredConfirmationFields = [
   "products.allowed_categories",
   "spending.per_item_purchase_price_max",
   "spending.currency",
-  "merchant.familiarity_required",
   "order_terms.require_returnable",
-  "order_terms.require_cancellable",
   "session.trusted_devices_only",
   "session.domestic_only",
 ] as const;
@@ -104,8 +100,6 @@ const DEFAULT_POLICY: ParsedPolicyDraft = {
     period_in_days: null,
   },
   merchant: {
-    familiarity_required: null,
-    familiarity_min_prior_approved: 0,
     blocklist: [],
     allowlist: [],
   },
@@ -126,8 +120,7 @@ const DEFAULT_POLICY: ParsedPolicyDraft = {
 
 export default function WalletPage() {
   const router = useRouter();
-  const [step, setStep] = useState<Step>("select");
-  const [walletId, setWalletId] = useState("");
+  const [step, setStep] = useState<Step>("describe");
   const [policyText, setPolicyText] = useState("");
   const [draftPolicy, setDraftPolicy] = useState<ParsedPolicyDraft>(DEFAULT_POLICY);
   const [preparedJob, setPreparedJob] = useState<ScenarioJobResponse | null>(null);
@@ -136,7 +129,7 @@ export default function WalletPage() {
   const [error, setError] = useState("");
 
   const progress = useMemo(
-    () => ({ select: 1, describe: 2, review: 3, confirm: 4 })[step],
+    () => ({ describe: 1, review: 2, confirm: 3 })[step],
     [step],
   );
 
@@ -170,13 +163,6 @@ export default function WalletPage() {
 
   const missingRequiredFields = requiredConfirmationFields.filter(isUnknown);
 
-  const selectWallet = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!walletId) return;
-    setStep("describe");
-    setError("");
-  };
-
   const submitPolicy = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!policyText.trim()) return;
@@ -188,7 +174,7 @@ export default function WalletPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          wallet_id: Number(walletId),
+          wallet_id: WALLET_ID,
           policy_text: policyText.trim(),
         }),
       });
@@ -222,7 +208,7 @@ export default function WalletPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          wallet_id: Number(walletId),
+          wallet_id: WALLET_ID,
           policy,
         }),
       });
@@ -289,49 +275,15 @@ export default function WalletPage() {
           <div className="mb-8 flex items-center justify-between">
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">
-                Step {progress} of 4
+                Step {progress} of 3
               </p>
               <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-                {step === "select" && "Choose a wallet"}
                 {step === "describe" && "Describe your shopping rules"}
                 {step === "review" && "Review your wallet policy"}
                 {step === "confirm" && "Confirm the Leash mandate"}
               </h1>
             </div>
           </div>
-
-          {step === "select" && (
-            <form onSubmit={selectWallet} className="space-y-6">
-              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
-                  <Sparkles size={24} />
-                </div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">
-                  Wallet ID
-                </label>
-                <select
-                  value={walletId}
-                  onChange={(e) => setWalletId(e.target.value)}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base outline-none focus:border-emerald-500"
-                  required
-                >
-                  <option value="">Select an ID</option>
-                  {Array.from({ length: 32 }, (_, id) => (
-                    <option key={id} value={id}>
-                      Wallet {id}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <button
-                type="submit"
-                disabled={!walletId}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-3.5 font-semibold text-white hover:bg-slate-700 disabled:opacity-40"
-              >
-                Continue <ArrowRight size={18} />
-              </button>
-            </form>
-          )}
 
           {step === "describe" && (
             <form onSubmit={submitPolicy} className="space-y-6">
@@ -348,14 +300,7 @@ export default function WalletPage() {
                 />
               </div>
               {error && <ErrorMessage message={error} />}
-              <div className="flex justify-between">
-                <button
-                  type="button"
-                  onClick={() => setStep("select")}
-                  className="flex items-center gap-2 rounded-xl px-4 py-3 font-semibold text-slate-600 hover:bg-slate-200"
-                >
-                  <ArrowLeft size={18} /> Back
-                </button>
+              <div className="flex justify-end">
                 <button
                   type="submit"
                   disabled={!policyText.trim() || isSubmitting}
@@ -490,40 +435,10 @@ export default function WalletPage() {
                   />
                 </SectionBlock>
 
-                {/* 4. Merchant */}
+                {/* 4. Order Terms */}
                 <SectionBlock
-                  title="4. Merchant Rules"
-                  needsAttention={isUnknown("merchant.familiarity_required")}
-                >
-                  <SelectField
-                    label="Familiarity Required"
-                    value={
-                      draftPolicy.merchant?.familiarity_required === null
-                        ? ""
-                        : String(draftPolicy.merchant?.familiarity_required)
-                    }
-                    options={[
-                      { label: "Yes", value: "true" },
-                      { label: "No", value: "false" },
-                    ]}
-                    onChange={(val) =>
-                      updatePolicyValue(
-                        "merchant.familiarity_required",
-                        val === "" ? null : val === "true",
-                      )
-                    }
-                    required
-                    needsAttention={isUnknown("merchant.familiarity_required")}
-                  />
-                </SectionBlock>
-
-                {/* 5. Order Terms */}
-                <SectionBlock
-                  title="5. Order Terms"
-                  needsAttention={[
-                    "order_terms.require_returnable",
-                    "order_terms.require_cancellable",
-                  ].some(isUnknown)}
+                  title="4. Order Terms"
+                  needsAttention={isUnknown("order_terms.require_returnable")}
                 >
                   <SelectField
                     label="Require Returnable"
@@ -562,14 +477,12 @@ export default function WalletPage() {
                         val === "" ? null : val === "true",
                       )
                     }
-                    required
-                    needsAttention={isUnknown("order_terms.require_cancellable")}
                   />
                 </SectionBlock>
 
-                {/* 6. Session */}
+                {/* 5. Session */}
                 <SectionBlock
-                  title="6. Session Restrictions"
+                  title="5. Session Restrictions"
                   needsAttention={[
                     "session.trusted_devices_only",
                     "session.domestic_only",
@@ -617,9 +530,9 @@ export default function WalletPage() {
                   />
                 </SectionBlock>
 
-                {/* 7. Duplicate Purchase Check - optional, but preserved from the
+                {/* 6. Duplicate Purchase Check - optional, but preserved from the
                     parsed draft instead of silently discarded on confirm. */}
-                <SectionBlock title="7. Duplicate Purchase Check">
+                <SectionBlock title="6. Duplicate Purchase Check">
                   <InputField
                     label="Block repeat purchases within (minutes)"
                     type="number"

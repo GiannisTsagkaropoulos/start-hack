@@ -16,20 +16,6 @@ def test_mandate_snapshot_amount_only():
     policy = mandate_snapshot_to_engine_policy(mandate)
     assert policy.spending.per_item_purchase_price_max == 1000
     assert policy.products.allowed_categories == ["groceries"]
-    assert policy.merchant.familiarity_required is False
-
-
-def test_mandate_snapshot_with_familiarity():
-    mandate = {
-        "hard_rules": [
-            {"field": "authorization.billing_amount_chf", "operator": "<=", "value": 120, "currency": "CHF", "scope": "purchase"},
-            {"field": "history.approved_merchant_transaction_count", "operator": ">=", "value": 3},
-        ],
-    }
-    policy = mandate_snapshot_to_engine_policy(mandate)
-    assert policy.spending.per_item_purchase_price_max == 120
-    assert policy.merchant.familiarity_required is True
-    assert policy.merchant.familiarity_min_prior_approved == 3
 
 
 def test_mandate_snapshot_no_amount_rule_raises():
@@ -102,7 +88,6 @@ def test_end_to_end_conversion_feeds_existing_engine_unchanged():
 
 if __name__ == "__main__":
     test_mandate_snapshot_amount_only()
-    test_mandate_snapshot_with_familiarity()
     test_mandate_snapshot_no_amount_rule_raises()
     test_authorization_event_to_purchase()
     test_end_to_end_conversion_feeds_existing_engine_unchanged()

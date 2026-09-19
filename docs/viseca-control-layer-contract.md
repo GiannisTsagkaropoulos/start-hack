@@ -38,10 +38,16 @@ The deterministic classifier first enforces the confirmed product-category
 allowlist against every cart line. A missing or mismatching category immediately
 declines the authorization without evaluating later rules. It then enforces
 event-local checks for per-item price (when the item currency matches the policy), merchant allow/block lists,
-returnability, cancellability, ten-minute attempt velocity, authority status,
-card status, and initiator type. It also retains the existing historical
-merchant-familiarity lookup. Missing event evidence or a required currency
-conversion produces `step_up`; a known hard-rule violation produces `decline`.
+returnability, subscription cancellability, ten-minute attempt velocity,
+authority status, card status, and initiator type. Cancellability is skipped
+for every non-subscription product, even if its event uses the literal
+`"unknown"` rather than omitting the field.
+
+The classifier also counts earlier transactions for the merchant across every
+user and card. Fewer than three transactions, or unavailable history, produces
+`step_up` for customer approval; it is not an automatic rejection. Missing
+evidence for other checks or a required currency conversion also produces
+`step_up`; a known hard-rule violation produces `decline`.
 
 Period spend, trusted-device history, domestic-country resolution, duplicate
 detection, and cross-currency item prices require state or reference-data

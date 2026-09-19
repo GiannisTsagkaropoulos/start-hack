@@ -23,8 +23,6 @@ class _Products:
 
 @dataclass
 class _Merchant:
-    familiarity_required: bool = False
-    familiarity_min_prior_approved: int = 0
     blocklist: list[str] = field(default_factory=list)
     allowlist: list[str] = field(default_factory=list)
 
@@ -59,8 +57,6 @@ def mandate_snapshot_to_engine_policy(mandate: dict[str, Any]) -> EnginePolicy:
     hard_rules = mandate.get("hard_rules", [])
 
     per_item_max: float | None = None
-    familiarity_required = False
-    familiarity_min: int = 0
     currency = "CHF"
     comparison_field = "items"
     blocklist: list[str] = []
@@ -83,11 +79,6 @@ def mandate_snapshot_to_engine_policy(mandate: dict[str, Any]) -> EnginePolicy:
                 per_item_max = float(value)
                 currency = rule.get("currency") or "CHF"
                 comparison_field = "billing_amount_chf" if field_name == "authorization.billing_amount_chf" else "items"
-
-        if field_name == "history.approved_merchant_transaction_count" and operator == ">=":
-            if isinstance(value, (int, float)):
-                familiarity_required = True
-                familiarity_min = int(value)
 
         if field_name == "authorization.merchant" and operator == "not_in" and isinstance(value, list):
             blocklist = [item for item in value if isinstance(item, str)]
@@ -118,8 +109,6 @@ def mandate_snapshot_to_engine_policy(mandate: dict[str, Any]) -> EnginePolicy:
         ),
         products=_Products(allowed_categories=allowed_categories),
         merchant=_Merchant(
-            familiarity_required=familiarity_required,
-            familiarity_min_prior_approved=familiarity_min,
             blocklist=blocklist,
             allowlist=allowlist,
         ),

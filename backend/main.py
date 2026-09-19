@@ -50,8 +50,6 @@ class Products(BaseModel):
 
 
 class Merchant(BaseModel):
-    familiarity_required: bool | None = None
-    familiarity_min_prior_approved: int = Field(default=0, ge=0)
     blocklist: list[str] = Field(default_factory=list)
     allowlist: list[str] = Field(default_factory=list)
 
@@ -95,8 +93,6 @@ class DraftProducts(BaseModel):
 
 
 class DraftMerchant(BaseModel):
-    familiarity_required: bool | None = None
-    familiarity_min_prior_approved: int | None = None
     blocklist: list[str] | None = None
     allowlist: list[str] | None = None
 
@@ -237,8 +233,6 @@ def parse_with_llm(text: str) -> DraftSchema:
     period_in_days: int | None = Field(default=None, gt=0)
 
 class Merchant(BaseModel):
-    familiarity_required: bool | None
-    familiarity_min_prior_approved: int = Field(default=0, ge=0)
     blocklist: list[str] = Field(default_factory=list)
     allowlist: list[str] = Field(default_factory=list)
 
@@ -294,20 +288,10 @@ def check_missing_fields(draft: dict[str, Any]) -> list[str]:
     if spending.get("period_in_days") is None:
         missing.append("spending.period_in_days")
 
-    # Merchant
-    merchant = draft.get("merchant", {})
-    if merchant.get("familiarity_required") is None:
-        missing.append("merchant.familiarity_required")
-    if merchant.get("familiarity_min_prior_approved") is None:
-        missing.append("merchant.familiarity_min_prior_approved")
-
     # Order Terms
     order_terms = draft.get("order_terms", {})
     if order_terms.get("require_returnable") is None:
         missing.append("order_terms.require_returnable")
-    if order_terms.get("require_cancellable") is None:
-        missing.append("order_terms.require_cancellable")
-
     # Session
     session = draft.get("session", {})
     if session.get("trusted_devices_only") is None:

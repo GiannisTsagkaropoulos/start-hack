@@ -47,8 +47,6 @@ export interface ParsedPolicyDraft {
     period_in_days: number | null;
   };
   merchant: {
-    familiarity_required: boolean | null;
-    familiarity_min_prior_approved: number | null;
     blocklist: string[] | null;
     allowlist: string[] | null;
   };
@@ -96,8 +94,6 @@ export interface WalletPolicy {
     period_in_days: number | null;
   };
   merchant: {
-    familiarity_required: boolean | null;
-    familiarity_min_prior_approved: number;
     blocklist: string[];
     allowlist: string[];
   };
