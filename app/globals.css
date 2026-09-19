@@ -1,26 +1,86 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --surface-0: #f6f7f5;
+  --surface-1: #ffffff;
+  --surface-2: #f0f1ee;
+  --surface-sunken: #eceeea;
+  --border-subtle: #e4e6e1;
+  --border-strong: #d3d6cf;
+  --ink-1: #14161b;
+  --ink-2: #4a4f47;
+  --ink-3: #82877e;
+  --authority: #0f6b4c;
+  --authority-strong: #0a5038;
+  --authority-tint: #e8f3ec;
+  --authority-tint-border: #bfe0cd;
+  --decline: #b3261e;
+  --decline-tint: #fbeceb;
+  --decline-tint-border: #eec4c0;
+  --review: #9a6700;
+  --review-tint: #fdf3e0;
+  --review-tint-border: #f0dcaa;
+  --evidence: #55606c;
+  --focus-ring: #0f6b4c;
+  --font-display: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-authority: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+  --color-ink-1: var(--ink-1);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-authority: var(--authority);
+  --color-authority-strong: var(--authority-strong);
+  --color-authority-tint: var(--authority-tint);
+  --color-decline: var(--decline);
+  --color-decline-tint: var(--decline-tint);
+  --color-review: var(--review);
+  --color-review-tint: var(--review-tint);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  border-color: var(--border-subtle);
+}
+
+html {
+  color-scheme: light;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--surface-0);
+  color: var(--ink-1);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background: var(--authority);
+  color: white;
+}
+
+/* Respect the OS/browser preference site-wide: any element that opted into
+   motion falls back to an instant, still-meaningful state transition. This
+   is enforced again per-component via useReducedMotion(), but the CSS rule
+   is the last line of defense for anything animated purely in CSS. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
