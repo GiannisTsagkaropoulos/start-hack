@@ -1,13 +1,20 @@
 import json
-import os
+from pathlib import Path
 from typing import Any, Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import openai
+from dotenv import load_dotenv
 
 import decision_engine
 from decision_engine import DecisionResponse
+from leash_client import LeashApiError
+from scenario_jobs import confirm_and_start_job, get_job, prepare_job, resolve_authorization
+
+
+load_dotenv()
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 Currency = Literal["CHF", "USD", "EUR"]
 
@@ -120,6 +127,15 @@ class ConfirmationResponse(BaseModel):
 class DecisionRequest(BaseModel):
     wallet_id: int = Field(ge=0, le=31)
     policy: Schema
+
+
+class PrepareMandateRequest(BaseModel):
+    wallet_id: int = Field(ge=0, le=31)
+    policy: Schema
+
+
+class ResolveAuthorizationRequest(BaseModel):
+    decision: Literal["approve", "decline"]
 
 
 app = FastAPI(title="Wallet Control Layer")
@@ -305,3 +321,61 @@ def confirm_policy(request: ConfirmationRequest) -> ConfirmationResponse:
 @app.post("/decision", response_model=DecisionResponse)
 def decide(request: DecisionRequest) -> DecisionResponse:
     return decision_engine.evaluate_purchase(request.policy)
+
+
+@app.post("/leash/mandates/prepare", status_code=201)
+def prepare_leash_mandate(request: PrepareMandateRequest) -> dict[str, Any]:
+    """Discover Leash metadata and create a draft for explicit user review."""
+    try:
+        return prepare_job(request.wallet_id, request.policy.model_dump())
+    except (KeyError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except LeashApiError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Leash rejected the mandate request (HTTP {error.status}): {error.error_body}",
+        ) from error
+
+
+@app.post("/leash/jobs/{job_id}/confirm", status_code=202)
+def confirm_leash_mandate_and_start(job_id: str) -> dict[str, Any]:
+    """Confirm the reviewed draft, then start processing every scenario."""
+    try:
+        return confirm_and_start_job(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except LeashApiError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Leash rejected mandate confirmation (HTTP {error.status}): {error.error_body}",
+        ) from error
+
+
+@app.get("/leash/jobs/{job_id}")
+def read_leash_job(job_id: str) -> dict[str, Any]:
+    try:
+        return get_job(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@app.post("/leash/jobs/{job_id}/authorizations/{authorization_id}/resolve")
+def resolve_leash_authorization(
+    job_id: str,
+    authorization_id: str,
+    request: ResolveAuthorizationRequest,
+) -> dict[str, Any]:
+    """Submit a real user answer for a pending step-up authorization."""
+    try:
+        return resolve_authorization(job_id, authorization_id, request.decision)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except LeashApiError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Leash rejected the customer resolution (HTTP {error.status}): {error.error_body}",
+        ) from error
