@@ -273,17 +273,17 @@ export default function WalletPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#f7f9f7] text-slate-900">
+    <main className="min-h-screen bg-void text-ink-0">
       <div className="mx-auto flex min-h-screen w-full max-w-4xl flex-col px-5 py-8 sm:px-8">
         <header className="flex items-center justify-between">
           <Link
             href="/"
-            className="text-lg font-bold tracking-tight text-slate-800"
+            className="text-lg font-bold tracking-tight text-ink-0"
           >
-            Viseca<span className="text-emerald-600">AI-shopper</span>
+            Viseca<span className="text-authority-strong">AI-shopper</span>
           </Link>
-          <div className="flex items-center gap-2 text-sm font-medium text-slate-500">
-            <ShieldCheck size={18} className="text-emerald-600" />
+          <div className="flex items-center gap-2 text-sm font-medium text-ink-2">
+            <ShieldCheck size={18} className="text-authority-strong" />
             Wallet policy setup
           </div>
         </header>
@@ -291,7 +291,7 @@ export default function WalletPage() {
         <section className="mx-auto w-full max-w-2xl flex-1 py-10 sm:py-14">
           <div className="mb-8 flex items-center justify-between">
             <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-authority-strong">
                 Step {progress} of 2
               </p>
               <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
@@ -303,15 +303,15 @@ export default function WalletPage() {
 
           {step === "describe" && (
             <form onSubmit={submitPolicy} className="space-y-6">
-              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                <label className="mb-2 block text-sm font-semibold text-slate-700">
+              <div className="rounded-3xl border border-border-hairline bg-surface-1 p-6">
+                <label className="mb-2 block text-sm font-semibold text-ink-1">
                   What do you want the agent to buy?
                 </label>
                 <textarea
                   value={policyText}
                   onChange={(e) => setPolicyText(e.target.value)}
                   placeholder="Example: Buy running shoes under €120. Require returnable items and allow trusted devices only."
-                  className="min-h-36 w-full rounded-xl border border-slate-300 px-4 py-3 text-base outline-none focus:border-emerald-500"
+                  className="min-h-36 w-full rounded-xl border border-border-hairline px-4 py-3 text-base outline-none focus:border-authority"
                   required
                 />
               </div>
@@ -320,7 +320,7 @@ export default function WalletPage() {
                 <button
                   type="submit"
                   disabled={!policyText.trim() || isSubmitting}
-                  className="flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3.5 font-semibold text-white hover:bg-slate-700 disabled:opacity-40"
+                  className="flex items-center gap-2 rounded-xl bg-ink-0 px-5 py-3.5 font-semibold text-void hover:bg-ink-1 disabled:opacity-40"
                 >
                   {isSubmitting ? "Parsing..." : "Parse policy"}{" "}
                   <ArrowRight size={18} />
@@ -332,19 +332,19 @@ export default function WalletPage() {
           {step === "review" && (
             <form onSubmit={prepareMandate} className="space-y-8">
               {/* Header Status */}
-              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="rounded-3xl border border-border-hairline bg-surface-1 p-6">
                 <div className="flex items-start justify-between">
                   <div>
                     <h2 className="text-xl font-semibold">
                       Here is what we extracted
                     </h2>
-                    <p className="mt-1 text-sm text-slate-500">
+                    <p className="mt-1 text-sm text-ink-2">
                       Yellow sections contain values the policy did not specify.
                       Complete every field marked Required before confirming.
                     </p>
                   </div>
                   <CheckCircle2
-                    className="shrink-0 text-emerald-500"
+                    className="shrink-0 text-authority-strong"
                     size={28}
                   />
                 </div>
@@ -371,21 +371,21 @@ export default function WalletPage() {
                     requestedItems.some((item) => !item.name || !item.category || !item.quantity)
                   }
                 >
-                  <p className="text-sm leading-6 text-slate-500">
+                  <p className="text-sm leading-6 text-ink-2">
                     Each row becomes a separate mandate item. Category is checked first;
                     quantity is tracked cumulatively across approved purchases.
                   </p>
                   {requestedItems.map((item, index) => (
                     <div
                       key={index}
-                      className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                      className="rounded-2xl border border-border-hairline bg-surface-2 p-4"
                     >
                       <div className="mb-3 flex items-center justify-between">
-                        <h4 className="font-semibold text-slate-800">Item {index + 1}</h4>
+                        <h4 className="font-semibold text-ink-0">Item {index + 1}</h4>
                         <button
                           type="button"
                           onClick={() => removeItem(index)}
-                          className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                          className="rounded-lg p-2 text-ink-3 hover:bg-decline-dim hover:text-decline"
                           aria-label={`Remove item ${index + 1}`}
                         >
                           <Trash2 size={17} />
@@ -445,7 +445,7 @@ export default function WalletPage() {
                   <button
                     type="button"
                     onClick={addItem}
-                    className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-emerald-400 px-4 py-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-50"
+                    className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-authority px-4 py-3 text-sm font-semibold text-authority-strong hover:bg-authority-dim"
                   >
                     <Plus size={17} /> Add another item
                   </button>
@@ -543,14 +543,14 @@ export default function WalletPage() {
                 <button
                   type="button"
                   onClick={() => setStep("describe")}
-                  className="flex items-center gap-2 rounded-xl px-4 py-3 font-semibold text-slate-600 hover:bg-slate-200"
+                  className="flex items-center gap-2 rounded-xl px-4 py-3 font-semibold text-ink-2 hover:bg-surface-2"
                 >
                   <ArrowLeft size={18} /> Edit prompt
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-3.5 font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
+                  className="flex items-center gap-2 rounded-xl bg-authority px-6 py-3.5 font-semibold text-white hover:bg-authority-strong disabled:opacity-40"
                 >
                   {isSubmitting ? "Starting scenarios..." : "Run scenario evaluation"}{" "}
                   <ArrowRight size={18} />
@@ -577,11 +577,11 @@ function SectionBlock({
     <div
       className={`rounded-3xl border p-6 shadow-sm ${
         needsAttention
-          ? "border-amber-300 bg-amber-50"
-          : "border-slate-200 bg-white"
+          ? "border-review/40 bg-review-dim"
+          : "border-border-hairline bg-surface-1"
       }`}
     >
-      <h3 className="mb-4 text-base font-bold text-slate-900">{title}</h3>
+      <h3 className="mb-4 text-base font-bold text-ink-0">{title}</h3>
       <div className="flex flex-col gap-4">{children}</div>
     </div>
   );
@@ -609,8 +609,8 @@ function InputField({
   step?: string;
 }) {
   return (
-    <label className="block text-sm font-semibold text-slate-700">
-      {label} {required && <span className="text-amber-800">Required</span>}
+    <label className="block text-sm font-semibold text-ink-1">
+      {label} {required && <span className="text-review">Required</span>}
       <input
         type={type}
         value={value}
@@ -619,8 +619,8 @@ function InputField({
         min={min}
         step={step}
         onChange={(e) => onChange(e.target.value)}
-        className={`mt-1 w-full rounded-xl border px-4 py-2.5 font-normal outline-none focus:border-emerald-500 ${
-          needsAttention ? "border-amber-300 bg-amber-50" : "border-slate-300 bg-white"
+        className={`mt-1 w-full rounded-xl border px-4 py-2.5 font-normal outline-none focus:border-authority ${
+          needsAttention ? "border-review/40 bg-review-dim" : "border-border-hairline bg-surface-1"
         }`}
       />
     </label>
@@ -643,14 +643,14 @@ function SelectField({
   needsAttention?: boolean;
 }) {
   return (
-    <label className="block text-sm font-semibold text-slate-700">
-      {label} {required && <span className="text-amber-800">Required</span>}
+    <label className="block text-sm font-semibold text-ink-1">
+      {label} {required && <span className="text-review">Required</span>}
       <select
         value={value}
         required={required}
         onChange={(e) => onChange(e.target.value)}
-        className={`mt-1 w-full rounded-xl border px-4 py-2.5 font-normal outline-none focus:border-emerald-500 ${
-          needsAttention ? "border-amber-300 bg-amber-50" : "border-slate-300 bg-white"
+        className={`mt-1 w-full rounded-xl border px-4 py-2.5 font-normal outline-none focus:border-authority ${
+          needsAttention ? "border-review/40 bg-review-dim" : "border-border-hairline bg-surface-1"
         }`}
       >
         <option value="">{required ? "Select an option" : "Don't care"}</option>
@@ -668,7 +668,7 @@ function ErrorMessage({ message }: { message: string }) {
   return (
     <p
       role="alert"
-      className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+      className="flex items-center gap-2 rounded-xl border border-decline/30 bg-decline-dim px-4 py-3 text-sm text-decline"
     >
       <AlertCircle size={17} /> {message}
     </p>
