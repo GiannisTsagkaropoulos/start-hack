@@ -55,9 +55,6 @@ const DEFAULT_POLICY: ParsedPolicyDraft = {
     trusted_devices_only: true,
     domestic_only: null,
   },
-  duplicate_check: {
-    block_repeats_within_minutes: null,
-  },
   notes_for_customer: "",
 };
 

@@ -42,7 +42,6 @@ export interface ParsedPolicyDraft {
     trusted_devices_only: boolean | null;
     domestic_only: boolean | null;
   };
-  duplicate_check: { block_repeats_within_minutes: number | null };
   notes_for_customer: string | null;
 }
 
@@ -110,7 +109,6 @@ export interface LocalMandateV2 {
     max_recent_attempts_10m: StateValue;
     domestic_only: "unrestricted" | "required" | "review";
   };
-  duplicate_check: StateValue;
   prompt_injection_defense: true;
 }
 
@@ -233,9 +231,6 @@ export function toLocalMandateV2(
         : { state: "required", value: draft.session.max_recent_attempts_10m },
       domestic_only: draft.session.domestic_only ? "required" : "unrestricted",
     },
-    duplicate_check: draft.duplicate_check.block_repeats_within_minutes === null
-      ? unrestricted()
-      : { state: "required", value: draft.duplicate_check.block_repeats_within_minutes },
     prompt_injection_defense: true,
   };
 }
