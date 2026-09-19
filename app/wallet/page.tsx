@@ -162,10 +162,19 @@ export default function WalletPage() {
     setIsSubmitting(true);
     setError("");
     try {
+      // The currency <select> displays a "CHF" fallback when unset but never
+      // writes it back into state unless the user touches the dropdown, so
+      // draftPolicy.spending.currency can still be null here even though the
+      // screen has been showing "CHF" the whole time. Sync state to exactly
+      // what was already displayed before submitting - not a default chosen
+      // now, the same value the user already saw and did not object to.
+      const policyToSend = draftPolicy.spending?.currency
+        ? draftPolicy
+        : { ...draftPolicy, spending: { ...draftPolicy.spending, currency: "CHF" } };
       const res = await fetch(`${API_URL}/confirm-policy`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_id: Number(walletId), policy: draftPolicy }),
+        body: JSON.stringify({ wallet_id: Number(walletId), policy: policyToSend }),
       });
       if (!res.ok) {
         const errData = await res.json();
@@ -178,7 +187,7 @@ export default function WalletPage() {
       // the SAME confirmed policy object on both screens without inventing
       // real persistence, which isn't ours to build.
       try {
-        sessionStorage.setItem(`leash:wallet:${walletId}`, JSON.stringify(draftPolicy));
+        sessionStorage.setItem(`leash:wallet:${walletId}`, JSON.stringify(policyToSend));
       } catch {
         // sessionStorage unavailable (private mode etc.) - activity page falls
         // back to its own representative fixture, not a functional loss here.
