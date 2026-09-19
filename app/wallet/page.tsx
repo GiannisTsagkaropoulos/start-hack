@@ -358,7 +358,7 @@ export default function WalletPage() {
                     <input
                       type="number"
                       value={draftPolicy.spending?.per_period_purchase_price_max ?? ""}
-                      placeholder="No limit set"
+                      placeholder="None"
                       onChange={(e) =>
                         updatePolicyValue(
                           "spending.per_period_purchase_price_max",
