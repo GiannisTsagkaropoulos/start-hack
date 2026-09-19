@@ -42,13 +42,18 @@ General extraction rules:
    example unless that value is independently present in the current message.
 
 Spending rules:
-- per_item_purchase_price_max is the maximum price of one product or item.
-  Phrases such as "each", "per item", "per product", or a generic product
-  ceiling such as "shoes up to CHF 150" belong here.
-- per_period_purchase_price_max is a total budget over time. Only populate it
-  when the user states a total daily, weekly, monthly, yearly, or N-day limit.
-- Never copy one amount into both price fields unless the user explicitly gives
-  both limits.
+- Each requested object has its own optional max_price_per_item. Populate it
+  only when the amount clearly applies to that individual object, using phrases
+  such as "each", "per item", or "this monitor under CHF 300".
+- spending.total_price_max is a shared ceiling for the whole basket or for a
+  rolling period. A phrase such as "all of it for at most CHF 500" is a basket
+  total even when no period is stated.
+- period_in_days is optional. When it is null, total_price_max applies only to
+  the current basket. When it is present, total_price_max applies cumulatively
+  to historical approved spend, approved purchases earlier in the current
+  scenario, and the current basket.
+- Never copy a shared total into any item's max_price_per_item, and never copy
+  one item's price limit to another item.
 - period_in_days is 1 for daily, 7 for weekly, 30 for monthly, and 365 for
   yearly. Use an explicit N for "every N days". Otherwise use null.
 - currency must be exactly CHF, USD, or EUR. Normalize CHF, Swiss franc(s),
@@ -59,21 +64,32 @@ Spending rules:
   default to USD, CHF, or EUR.
 - If the text contains conflicting currencies and does not resolve the
   conflict, use null.
-- A stated price must not be omitted. Put it in the field indicated by its
-  scope; leave only the genuinely unstated spending fields null.
+- A stated price must not be omitted. Put it in total_price_max or the matching
+  item's max_price_per_item according to its wording; leave only genuinely
+  unstated price fields null.
 
-Product category is the primary authorization rule. Infer categories from the
-products or services the user wants to buy, never merely from the merchant's
-business type. Use one or more values from this closed list and no others:
+Requested items:
+- Create one products.items entry for every distinct object or service the user
+  asks the agent to buy. Preserve their order of mention. Never merge multiple
+  objects into one category entry.
+- name is a short singular description of that requested object.
+- category is the primary authorization rule. Infer it from the requested
+  object, never merely from the merchant's business type. Use exactly one value
+  from this closed list and no others:
 
 {PRODUCT_CATEGORY_GUIDE}
 
-For multiple requested product types, include every applicable category. If no
-product or service can be identified confidently, allowed_categories must be
-null. Important distinctions: running shoes are sporting_goods; ordinary
-fashion shoes are clothing; food ingredients are groceries; a restaurant meal
-is dining; delivered prepared food is food_delivery; a recurring streaming
-plan is subscriptions.
+- quantity is the cumulative maximum quantity the agent may buy under this
+  mandate. Extract an
+  explicit number, including "a", "an", or singular wording as 1. If quantity
+  is genuinely absent or ambiguous, use null so the customer must provide it.
+- A count modifies one item entry: "three pairs of running shoes" is one item
+  with quantity 3, never three duplicate item entries.
+- If no requested product can be identified confidently, products.items must
+  be null. Important distinctions: running shoes are sporting_goods; ordinary
+  fashion shoes are clothing; food ingredients are groceries; a restaurant
+  meal is dining; delivered prepared food is food_delivery; a recurring
+  streaming plan is subscriptions.
 
 Order terms:
 - If returnability is not mentioned, require_returnable defaults to true.
@@ -84,10 +100,16 @@ Order terms:
 Output this exact object shape through structured output:
 {{
   "raw_instructions": string,
-  "products": {{"allowed_categories": category[] | null}},
+  "products": {{
+    "items": [{{
+      "name": string | null,
+      "category": category | null,
+      "quantity": integer | null,
+      "max_price_per_item": number | null
+    }}] | null
+  }},
   "spending": {{
-    "per_item_purchase_price_max": number | null,
-    "per_period_purchase_price_max": number | null,
+    "total_price_max": number | null,
     "currency": "CHF" | "USD" | "EUR" | null,
     "period_in_days": integer | null
   }},
@@ -103,15 +125,19 @@ Output this exact object shape through structured output:
 
 EXAMPLE_INPUTS_AND_OUTPUTS = [
     (
-        "Let my agent buy running shoes for up to 180 franks each, and spend no more than 400 francs every 30 days.",
+        "Buy two books and one computer monitor for no more than 500 franks total.",
         {
-            "raw_instructions": "Let my agent buy running shoes for up to 180 franks each, and spend no more than 400 francs every 30 days.",
-            "products": {"allowed_categories": ["sporting_goods"]},
+            "raw_instructions": "Buy two books and one computer monitor for no more than 500 franks total.",
+            "products": {
+                "items": [
+                    {"name": "book", "category": "books", "quantity": 2, "max_price_per_item": None},
+                    {"name": "computer monitor", "category": "electronics", "quantity": 1, "max_price_per_item": None},
+                ]
+            },
             "spending": {
-                "per_item_purchase_price_max": 180,
-                "per_period_purchase_price_max": 400,
+                "total_price_max": 500,
                 "currency": "CHF",
-                "period_in_days": 30,
+                "period_in_days": None,
             },
             "merchant": {"blocklist": [], "allowlist": []},
             "order_terms": {
@@ -122,13 +148,39 @@ EXAMPLE_INPUTS_AND_OUTPUTS = [
         },
     ),
     (
-        "Buy groceries up to 75 per item and limit the total to 300 each month.",
+        "Buy one pair of running shoes for up to CHF 180 and two water bottles for CHF 25 each.",
         {
-            "raw_instructions": "Buy groceries up to 75 per item and limit the total to 300 each month.",
-            "products": {"allowed_categories": ["groceries"]},
+            "raw_instructions": "Buy one pair of running shoes for up to CHF 180 and two water bottles for CHF 25 each.",
+            "products": {
+                "items": [
+                    {"name": "running shoes", "category": "sporting_goods", "quantity": 1, "max_price_per_item": 180},
+                    {"name": "water bottle", "category": "sporting_goods", "quantity": 2, "max_price_per_item": 25},
+                ]
+            },
             "spending": {
-                "per_item_purchase_price_max": 75,
-                "per_period_purchase_price_max": 300,
+                "total_price_max": None,
+                "currency": "CHF",
+                "period_in_days": None,
+            },
+            "merchant": {"blocklist": [], "allowlist": []},
+            "order_terms": {
+                "require_returnable": True,
+                "require_cancellable": True,
+            },
+            "notes_for_customer": "",
+        },
+    ),
+    (
+        "Allow three ebooks with a total budget of 300 each month.",
+        {
+            "raw_instructions": "Allow three ebooks with a total budget of 300 each month.",
+            "products": {
+                "items": [
+                    {"name": "ebook", "category": "books", "quantity": 3, "max_price_per_item": None},
+                ]
+            },
+            "spending": {
+                "total_price_max": 300,
                 "currency": None,
                 "period_in_days": 30,
             },
@@ -138,25 +190,6 @@ EXAMPLE_INPUTS_AND_OUTPUTS = [
                 "require_cancellable": True,
             },
             "notes_for_customer": "Currency was not specified.",
-        },
-    ),
-    (
-        "Create controls for buying electronics.",
-        {
-            "raw_instructions": "Create controls for buying electronics.",
-            "products": {"allowed_categories": ["electronics"]},
-            "spending": {
-                "per_item_purchase_price_max": None,
-                "per_period_purchase_price_max": None,
-                "currency": None,
-                "period_in_days": None,
-            },
-            "merchant": {"blocklist": [], "allowlist": []},
-            "order_terms": {
-                "require_returnable": True,
-                "require_cancellable": True,
-            },
-            "notes_for_customer": "Spending limits and currency were not specified.",
         },
     ),
 ]

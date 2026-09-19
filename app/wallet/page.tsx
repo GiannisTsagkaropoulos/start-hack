@@ -1,15 +1,16 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   ArrowLeft,
   ArrowRight,
-  Check,
   CheckCircle2,
+  Plus,
   ShieldCheck,
+  Trash2,
 } from "lucide-react";
 import {
   ParsePolicyResponse,
@@ -25,13 +26,17 @@ function toWalletPolicy(draft: ParsedPolicyDraft): WalletPolicy {
   return {
     raw_instructions: draft.raw_instructions,
     products: {
-      allowed_categories: draft.products.allowed_categories ?? [],
+      items: (draft.products.items ?? []).map((item) => ({
+        name: item.name as string,
+        category: item.category as ProductCategory,
+        quantity: item.quantity as number,
+        max_price_per_item: item.max_price_per_item ?? null,
+      })),
     },
     spending: {
-      per_item_purchase_price_max: draft.spending.per_item_purchase_price_max as number,
-      per_period_purchase_price_max: draft.spending.per_period_purchase_price_max as number,
+      total_price_max: draft.spending.total_price_max ?? null,
       currency: draft.spending.currency as WalletPolicy["spending"]["currency"],
-      period_in_days: draft.spending.period_in_days as number,
+      period_in_days: draft.spending.period_in_days ?? null,
     },
     merchant: {
       blocklist: draft.merchant.blocklist ?? [],
@@ -45,7 +50,7 @@ function toWalletPolicy(draft: ParsedPolicyDraft): WalletPolicy {
   };
 }
 
-type Step = "describe" | "review" | "confirm";
+type Step = "describe" | "review";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const WALLET_ID = 0;
@@ -69,22 +74,36 @@ const PRODUCT_CATEGORIES: { label: string; value: ProductCategory }[] = [
   { label: "Transport", value: "transport" },
 ];
 
-const requiredConfirmationFields = [
-  "products.allowed_categories",
-  "spending.per_item_purchase_price_max",
-  "spending.per_period_purchase_price_max",
-  "spending.currency",
-  "spending.period_in_days",
-] as const;
+type DraftItem = NonNullable<ParsedPolicyDraft["products"]["items"]>[number];
+
+function getMissingRequiredFields(policy: ParsedPolicyDraft): string[] {
+  const missing: string[] = [];
+  const items = policy.products.items ?? [];
+  if (items.length === 0) missing.push("products.items");
+  items.forEach((item, index) => {
+    if (!item.name?.trim()) missing.push(`products.items.${index}.name`);
+    if (!item.category) missing.push(`products.items.${index}.category`);
+    if (!item.quantity || item.quantity < 1) missing.push(`products.items.${index}.quantity`);
+  });
+
+  const hasItemLimit = items.some((item) => item.max_price_per_item !== null);
+  if (policy.spending.total_price_max === null && !hasItemLimit) {
+    missing.push("spending.total_price_max_or_item_limit");
+  }
+  if (!policy.spending.currency) missing.push("spending.currency");
+  if (policy.spending.period_in_days !== null && policy.spending.total_price_max === null) {
+    missing.push("spending.total_price_max");
+  }
+  return missing;
+}
 
 const DEFAULT_POLICY: ParsedPolicyDraft = {
   raw_instructions: "",
   products: {
-    allowed_categories: null,
+    items: null,
   },
   spending: {
-    per_item_purchase_price_max: null,
-    per_period_purchase_price_max: null,
+    total_price_max: null,
     currency: null,
     period_in_days: null,
   },
@@ -104,15 +123,11 @@ export default function WalletPage() {
   const [step, setStep] = useState<Step>("describe");
   const [policyText, setPolicyText] = useState("");
   const [draftPolicy, setDraftPolicy] = useState<ParsedPolicyDraft>(DEFAULT_POLICY);
-  const [preparedJob, setPreparedJob] = useState<ScenarioJobResponse | null>(null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  const progress = useMemo(
-    () => ({ describe: 1, review: 2, confirm: 3 })[step],
-    [step],
-  );
+  const progress = step === "describe" ? 1 : 2;
 
   const updatePolicyValue = (path: string, value: unknown) => {
     const keys = path.split(".");
@@ -132,6 +147,35 @@ export default function WalletPage() {
 
   };
 
+  const updateItem = (index: number, field: keyof DraftItem, value: DraftItem[keyof DraftItem]) => {
+    setDraftPolicy((previous) => {
+      const items = [...(previous.products.items ?? [])];
+      items[index] = { ...items[index], [field]: value };
+      return { ...previous, products: { items } };
+    });
+  };
+
+  const addItem = () => {
+    setDraftPolicy((previous) => ({
+      ...previous,
+      products: {
+        items: [
+          ...(previous.products.items ?? []),
+          { name: "", category: null, quantity: null, max_price_per_item: null },
+        ],
+      },
+    }));
+  };
+
+  const removeItem = (index: number) => {
+    setDraftPolicy((previous) => ({
+      ...previous,
+      products: {
+        items: (previous.products.items ?? []).filter((_, itemIndex) => itemIndex !== index),
+      },
+    }));
+  };
+
   const isUnknown = (path: string) => {
     const value = path.split(".").reduce<unknown>((current, key) => {
       if (typeof current !== "object" || current === null) return undefined;
@@ -142,7 +186,12 @@ export default function WalletPage() {
       (Array.isArray(value) && value.length === 0);
   };
 
-  const missingRequiredFields = requiredConfirmationFields.filter(isUnknown);
+  const requestedItems = draftPolicy.products.items ?? [];
+  const hasItemPriceLimit = requestedItems.some((item) => item.max_price_per_item !== null);
+  const needsMonetaryLimit = draftPolicy.spending.total_price_max === null && !hasItemPriceLimit;
+  const periodNeedsTotal =
+    draftPolicy.spending.period_in_days !== null && draftPolicy.spending.total_price_max === null;
+  const missingRequiredFields = getMissingRequiredFields(draftPolicy);
 
   const submitPolicy = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -198,23 +247,7 @@ export default function WalletPage() {
         throw new Error(await readErrorMessage(prepareRes, "The Leash mandate draft could not be created."));
       }
 
-      const job = (await prepareRes.json()) as ScenarioJobResponse;
-      setPreparedJob(job);
-      setStep("confirm");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Mandate preparation failed.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const confirmAndRun = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!preparedJob) return;
-
-    setIsSubmitting(true);
-    setError("");
-    try {
+      const preparedJob = (await prepareRes.json()) as ScenarioJobResponse;
       const response = await fetch(`${API_URL}/leash/jobs/${preparedJob.job_id}/confirm`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -226,11 +259,14 @@ export default function WalletPage() {
         );
       }
 
-      const job = (await response.json()) as ScenarioJobResponse;
-      sessionStorage.setItem(VERDICT_STORAGE_KEY, JSON.stringify({ job_id: job.job_id }));
+      const confirmedJob = (await response.json()) as ScenarioJobResponse;
+      sessionStorage.setItem(
+        VERDICT_STORAGE_KEY,
+        JSON.stringify({ job_id: confirmedJob.job_id }),
+      );
       router.push("/verdict");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not start the scenario run.");
+      setError(err instanceof Error ? err.message : "Could not prepare and start the scenario run.");
     } finally {
       setIsSubmitting(false);
     }
@@ -256,12 +292,11 @@ export default function WalletPage() {
           <div className="mb-8 flex items-center justify-between">
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">
-                Step {progress} of 3
+                Step {progress} of 2
               </p>
               <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
                 {step === "describe" && "Describe your shopping rules"}
                 {step === "review" && "Review your wallet policy"}
-                {step === "confirm" && "Confirm the Leash mandate"}
               </h1>
             </div>
           </div>
@@ -328,49 +363,101 @@ export default function WalletPage() {
                   />
                 </SectionBlock>
 
-                {/* 2. Products - the primary authorization rule. */}
+                {/* 2. Requested items - category remains the primary rule. */}
                 <SectionBlock
-                  title="2. Allowed Product Categories"
-                  needsAttention={isUnknown("products.allowed_categories")}
+                  title="2. Requested Items"
+                  needsAttention={
+                    requestedItems.length === 0 ||
+                    requestedItems.some((item) => !item.name || !item.category || !item.quantity)
+                  }
                 >
-                  <MultiSelectField
-                    label="Every cart item must match one of these categories"
-                    values={draftPolicy.products?.allowed_categories ?? []}
-                    options={PRODUCT_CATEGORIES}
-                    onChange={(values) =>
-                      updatePolicyValue("products.allowed_categories", values)
-                    }
-                    required
-                    needsAttention={isUnknown("products.allowed_categories")}
-                  />
+                  <p className="text-sm leading-6 text-slate-500">
+                    Each row becomes a separate mandate item. Category is checked first;
+                    quantity is tracked cumulatively across approved purchases.
+                  </p>
+                  {requestedItems.map((item, index) => (
+                    <div
+                      key={index}
+                      className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                    >
+                      <div className="mb-3 flex items-center justify-between">
+                        <h4 className="font-semibold text-slate-800">Item {index + 1}</h4>
+                        <button
+                          type="button"
+                          onClick={() => removeItem(index)}
+                          className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                          aria-label={`Remove item ${index + 1}`}
+                        >
+                          <Trash2 size={17} />
+                        </button>
+                      </div>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <InputField
+                          label="Requested object"
+                          value={item.name ?? ""}
+                          placeholder="e.g. computer monitor"
+                          onChange={(value) => updateItem(index, "name", value || null)}
+                          required
+                          needsAttention={!item.name}
+                        />
+                        <SelectField
+                          label="Product category"
+                          value={item.category ?? ""}
+                          options={PRODUCT_CATEGORIES}
+                          onChange={(value) =>
+                            updateItem(index, "category", (value || null) as ProductCategory | null)
+                          }
+                          required
+                          needsAttention={!item.category}
+                        />
+                        <InputField
+                          label="Total quantity allowed"
+                          type="number"
+                          value={item.quantity ?? ""}
+                          placeholder="e.g. 1"
+                          onChange={(value) =>
+                            updateItem(index, "quantity", value ? parseInt(value, 10) : null)
+                          }
+                          required
+                          needsAttention={!item.quantity}
+                          min="1"
+                          step="1"
+                        />
+                        <InputField
+                          label="Max price for this item"
+                          type="number"
+                          value={item.max_price_per_item ?? ""}
+                          placeholder="Optional when a total limit is set"
+                          onChange={(value) =>
+                            updateItem(
+                              index,
+                              "max_price_per_item",
+                              value ? parseFloat(value) : null,
+                            )
+                          }
+                          needsAttention={needsMonetaryLimit}
+                          min="0.01"
+                          step="0.01"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={addItem}
+                    className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-emerald-400 px-4 py-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-50"
+                  >
+                    <Plus size={17} /> Add another item
+                  </button>
                 </SectionBlock>
 
                 {/* 3. Spending */}
                 <SectionBlock
                   title="3. Spending Controls"
-                  needsAttention={[
-                    "spending.per_item_purchase_price_max",
-                    "spending.currency",
-                    "spending.per_period_purchase_price_max",
-                    "spending.period_in_days",
-                  ].some(isUnknown)}
+                  needsAttention={
+                    needsMonetaryLimit || isUnknown("spending.currency") || periodNeedsTotal
+                  }
                 >
-                  <InputField
-                    label="Max Price Per Item"
-                    type="number"
-                    value={
-                      draftPolicy.spending?.per_item_purchase_price_max ?? ""
-                    }
-                    placeholder="e.g. 120.00"
-                    onChange={(val) =>
-                      updatePolicyValue(
-                        "spending.per_item_purchase_price_max",
-                        val ? parseFloat(val) : null,
-                      )
-                    }
-                    required
-                    needsAttention={isUnknown("spending.per_item_purchase_price_max")}
-                  />
                   <SelectField
                     label="Currency"
                     value={draftPolicy.spending?.currency || ""}
@@ -386,36 +473,22 @@ export default function WalletPage() {
                     needsAttention={isUnknown("spending.currency")}
                   />
                   <InputField
-                    label="Max Price Per Period"
+                    label="Maximum total spend"
                     type="number"
-                    value={
-                      draftPolicy.spending?.per_period_purchase_price_max ?? ""
-                    }
+                    value={draftPolicy.spending?.total_price_max ?? ""}
                     placeholder="e.g. 500.00"
                     onChange={(val) =>
                       updatePolicyValue(
-                        "spending.per_period_purchase_price_max",
+                        "spending.total_price_max",
                         val ? parseFloat(val) : null,
                       )
                     }
-                    required
-                    needsAttention={isUnknown("spending.per_period_purchase_price_max")}
+                    required={needsMonetaryLimit || periodNeedsTotal}
+                    needsAttention={needsMonetaryLimit || periodNeedsTotal}
+                    min="0.01"
+                    step="0.01"
                   />
 
-                  <InputField
-                    label="Period (in Days)"
-                    type="number"
-                    value={draftPolicy.spending?.period_in_days ?? ""}
-                    placeholder="e.g. 30"
-                    onChange={(val) =>
-                      updatePolicyValue(
-                        "spending.period_in_days",
-                        val ? parseInt(val) : null,
-                      )
-                    }
-                    required
-                    needsAttention={isUnknown("spending.period_in_days")}
-                  />
                 </SectionBlock>
 
                 {/* 4. Order Terms */}
@@ -479,65 +552,7 @@ export default function WalletPage() {
                   disabled={isSubmitting}
                   className="flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-3.5 font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
                 >
-                  {isSubmitting ? "Creating draft..." : "Create mandate draft"}{" "}
-                  <Check size={18} />
-                </button>
-              </div>
-            </form>
-          )}
-
-          {step === "confirm" && preparedJob && (
-            <form onSubmit={confirmAndRun} className="space-y-6">
-              <div className="rounded-3xl border border-emerald-200 bg-white p-6 shadow-sm">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">
-                      Leash draft {preparedJob.draft.draft_id}
-                    </p>
-                    <h2 className="mt-2 text-xl font-semibold">Review before activation</h2>
-                    <p className="mt-2 text-sm leading-6 text-slate-500">
-                      The service is healthy, bootstrap and reference data were loaded, and this
-                      draft has not been activated yet. Confirming starts all five scenarios.
-                    </p>
-                  </div>
-                  <CheckCircle2 className="shrink-0 text-emerald-500" size={28} />
-                </div>
-              </div>
-
-              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                <h3 className="font-bold">Instruction</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-700">{preparedJob.draft.instruction}</p>
-                <h3 className="mt-6 font-bold">Compiled checks</h3>
-                <div className="mt-3 space-y-3">
-                  {preparedJob.draft.hard_rules.map((rule, index) => (
-                    <div key={`${rule.field}-${index}`} className="rounded-xl bg-slate-50 p-4 text-sm">
-                      <span className="font-semibold text-slate-900">{rule.field}</span>{" "}
-                      <span className="text-slate-600">{rule.operator} {String(rule.value)}</span>
-                      {rule.currency && <span className="text-slate-500"> {rule.currency}</span>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {error && <ErrorMessage message={error} />}
-
-              <div className="flex justify-between gap-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPreparedJob(null);
-                    setStep("review");
-                  }}
-                  className="flex items-center gap-2 rounded-xl px-4 py-3 font-semibold text-slate-600 hover:bg-slate-200"
-                >
-                  <ArrowLeft size={18} /> Edit policy
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-3.5 font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
-                >
-                  {isSubmitting ? "Starting scenarios..." : "Confirm and run all scenarios"}
+                  {isSubmitting ? "Starting scenarios..." : "Run scenario evaluation"}{" "}
                   <ArrowRight size={18} />
                 </button>
               </div>
@@ -580,6 +595,8 @@ function InputField({
   placeholder = "",
   required = false,
   needsAttention = false,
+  min,
+  step,
 }: {
   label: string;
   value: string | number;
@@ -588,6 +605,8 @@ function InputField({
   placeholder?: string;
   required?: boolean;
   needsAttention?: boolean;
+  min?: string;
+  step?: string;
 }) {
   return (
     <label className="block text-sm font-semibold text-slate-700">
@@ -597,6 +616,8 @@ function InputField({
         value={value}
         placeholder={placeholder}
         required={required}
+        min={min}
+        step={step}
         onChange={(e) => onChange(e.target.value)}
         className={`mt-1 w-full rounded-xl border px-4 py-2.5 font-normal outline-none focus:border-emerald-500 ${
           needsAttention ? "border-amber-300 bg-amber-50" : "border-slate-300 bg-white"
@@ -640,53 +661,6 @@ function SelectField({
         ))}
       </select>
     </label>
-  );
-}
-
-function MultiSelectField({
-  label,
-  values,
-  options,
-  onChange,
-  required = false,
-  needsAttention = false,
-}: {
-  label: string;
-  values: ProductCategory[];
-  options: { label: string; value: ProductCategory }[];
-  onChange: (values: ProductCategory[]) => void;
-  required?: boolean;
-  needsAttention?: boolean;
-}) {
-  const selected = new Set(values);
-  return (
-    <fieldset
-      className={`rounded-xl border p-4 ${
-        needsAttention ? "border-amber-300 bg-amber-50" : "border-slate-300 bg-white"
-      }`}
-    >
-      <legend className="px-1 text-sm font-semibold text-slate-700">
-        {label} {required && <span className="text-amber-800">Required</span>}
-      </legend>
-      <div className="mt-2 grid gap-2 sm:grid-cols-2">
-        {options.map((option) => (
-          <label key={option.value} className="flex items-center gap-2 text-sm text-slate-700">
-            <input
-              type="checkbox"
-              checked={selected.has(option.value)}
-              onChange={(event) => {
-                const next = event.target.checked
-                  ? [...values, option.value]
-                  : values.filter((value) => value !== option.value);
-                onChange(next);
-              }}
-              className="size-4 rounded border-slate-300 text-emerald-600"
-            />
-            {option.label}
-          </label>
-        ))}
-      </div>
-    </fieldset>
   );
 }
 

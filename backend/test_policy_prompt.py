@@ -7,6 +7,7 @@ from policy_prompt import (
     detect_explicit_currency,
     detect_explicit_period_days,
 )
+from policy_items import merge_duplicate_items
 
 
 def test_currency_detection():
@@ -40,7 +41,17 @@ def test_examples_are_valid_complete_json_objects():
     for example_input, example_output in EXAMPLE_INPUTS_AND_OUTPUTS:
         assert example_output["raw_instructions"] == example_input
         assert set(example_output) == expected_keys
+        assert example_output["products"]["items"]
+        for item in example_output["products"]["items"]:
+            assert set(item) == {"name", "category", "quantity", "max_price_per_item"}
         json.dumps(example_output)
+
+
+def test_total_only_example_does_not_invent_item_caps_or_period():
+    _, example = EXAMPLE_INPUTS_AND_OUTPUTS[0]
+    assert example["spending"]["total_price_max"] == 500
+    assert example["spending"]["period_in_days"] is None
+    assert all(item["max_price_per_item"] is None for item in example["products"]["items"])
 
 
 def test_messages_keep_actual_user_text_separate_and_last():
@@ -52,8 +63,31 @@ def test_messages_keep_actual_user_text_separate_and_last():
     assert len(messages) == 2 + 2 * len(EXAMPLE_INPUTS_AND_OUTPUTS)
 
 
+def test_duplicate_item_rows_become_one_cumulative_allowance():
+    items = [
+        {
+            "name": "Trail-running shoes",
+            "category": "sporting_goods",
+            "quantity": 1,
+            "max_price_per_item": 180,
+        }
+        for _ in range(3)
+    ]
+    assert merge_duplicate_items(items) == [
+        {
+            "name": "Trail-running shoes",
+            "category": "sporting_goods",
+            "quantity": 3,
+            "max_price_per_item": 180,
+        }
+    ]
+
+
 if __name__ == "__main__":
     test_currency_detection()
     test_period_detection()
     test_examples_are_valid_complete_json_objects()
+    test_total_only_example_does_not_invent_item_caps_or_period()
     test_messages_keep_actual_user_text_separate_and_last()
+    test_duplicate_item_rows_become_one_cumulative_allowance()
+    print("POLICY PROMPT TESTS PASSED")

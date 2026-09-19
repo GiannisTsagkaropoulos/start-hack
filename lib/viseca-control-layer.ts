@@ -38,11 +38,15 @@ export interface ParsePolicyRequest {
 export interface ParsedPolicyDraft {
   raw_instructions: string;
   products: {
-    allowed_categories: ProductCategory[] | null;
+    items: Array<{
+      name: string | null;
+      category: ProductCategory | null;
+      quantity: number | null;
+      max_price_per_item: number | null;
+    }> | null;
   };
   spending: {
-    per_item_purchase_price_max: number | null;
-    per_period_purchase_price_max: number | null;
+    total_price_max: number | null;
     currency: Currency | null;
     period_in_days: number | null;
   };
@@ -77,13 +81,17 @@ export interface ConfirmPolicyResponse {
 export interface WalletPolicy {
   raw_instructions: string;
   products: {
-    allowed_categories: ProductCategory[];
+    items: Array<{
+      name: string;
+      category: ProductCategory;
+      quantity: number;
+      max_price_per_item: number | null;
+    }>;
   };
   spending: {
-    per_item_purchase_price_max: number;
-    per_period_purchase_price_max: number;
+    total_price_max: number | null;
     currency: Currency;
-    period_in_days: number;
+    period_in_days: number | null;
   };
   merchant: {
     blocklist: string[];
@@ -123,7 +131,7 @@ export interface DecisionResponse {
     "hard_rule_fail" | "hard_rule_unknown" | "soft_rule_fail" | "soft_rule_unknown"
   >;
   evidence: DecisionEvidence[];
-  engine_version: "rule-classifier-v2";
+  engine_version: "rule-classifier-v7";
 }
 
 export interface LeashHardRule {
@@ -145,9 +153,11 @@ export interface ScenarioPurchaseSummary {
   replay_order: number | null;
   items: Array<{
     name: string | null;
+    category: string | null;
     quantity: number | null;
     unit_price: number | null;
     currency: string | null;
+    details: string | null;
   }>;
 }
 

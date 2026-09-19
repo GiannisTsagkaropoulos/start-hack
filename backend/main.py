@@ -3,13 +3,14 @@ from pathlib import Path
 from typing import Any, Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 import openai
 from dotenv import load_dotenv
 
 import decision_engine
 from decision_engine import DecisionResponse
 from leash_client import LeashApiError
+from policy_items import merge_duplicate_items
 from policy_prompt import (
     build_policy_extraction_messages,
     detect_explicit_currency,
@@ -44,14 +45,20 @@ ProductCategory = Literal[
 
 # --- Strict Schemas (For Final Confirmation) ---
 class Spending(BaseModel):
-    per_item_purchase_price_max: float = Field(gt=0)
-    per_period_purchase_price_max: float = Field(gt=0)
+    total_price_max: float | None = Field(default=None, gt=0)
     currency: Currency
-    period_in_days: int = Field(gt=0)
+    period_in_days: int | None = Field(default=None, gt=0)
+
+
+class ProductItem(BaseModel):
+    name: str = Field(min_length=1)
+    category: ProductCategory
+    quantity: int = Field(ge=1)
+    max_price_per_item: float | None = Field(default=None, gt=0)
 
 
 class Products(BaseModel):
-    allowed_categories: list[ProductCategory] = Field(min_length=1)
+    items: list[ProductItem] = Field(min_length=1)
 
 
 class Merchant(BaseModel):
@@ -72,17 +79,32 @@ class Schema(BaseModel):
     order_terms: OrderTerms
     notes_for_customer: str = ""
 
+    @model_validator(mode="after")
+    def validate_spending_controls(self) -> "Schema":
+        has_item_limit = any(item.max_price_per_item is not None for item in self.products.items)
+        if self.spending.total_price_max is None and not has_item_limit:
+            raise ValueError("Provide a total-price limit or at least one item-price limit.")
+        if self.spending.period_in_days is not None and self.spending.total_price_max is None:
+            raise ValueError("A period can only be used with a total-price limit.")
+        return self
+
 
 # --- Draft Schemas (For LLM Extraction) ---
 class DraftSpending(BaseModel):
-    per_item_purchase_price_max: float | None = None
-    per_period_purchase_price_max: float | None = None
+    total_price_max: float | None = None
     currency: Currency | None = None
     period_in_days: int | None = None
 
 
+class DraftProductItem(BaseModel):
+    name: str | None = None
+    category: ProductCategory | None = None
+    quantity: int | None = None
+    max_price_per_item: float | None = None
+
+
 class DraftProducts(BaseModel):
-    allowed_categories: list[ProductCategory] | None = None
+    items: list[DraftProductItem] | None = None
 
 
 class DraftMerchant(BaseModel):
@@ -202,22 +224,30 @@ def parse_with_llm(text: str) -> DraftSchema:
 def check_missing_fields(draft: dict[str, Any]) -> list[str]:
     missing = []
 
-    # Product category is mandatory because it is the first authorization
-    # check and every cart line must match it.
+    # Every requested object is kept separately so category, quantity, and an
+    # optional unit-price ceiling can be checked against the matching cart line.
     products = draft.get("products", {})
-    if not products.get("allowed_categories"):
-        missing.append("products.allowed_categories")
+    items = products.get("items") or []
+    if not items:
+        missing.append("products.items")
+    for index, item in enumerate(items):
+        if not item.get("name"):
+            missing.append(f"products.items.{index}.name")
+        if not item.get("category"):
+            missing.append(f"products.items.{index}.category")
+        if item.get("quantity") is None:
+            missing.append(f"products.items.{index}.quantity")
 
-    # Spending
+    # At least one monetary ceiling is required, but it can be either a shared
+    # basket/period total or one or more item-level limits.
     spending = draft.get("spending", {})
-    if spending.get("per_item_purchase_price_max") is None:
-        missing.append("spending.per_item_purchase_price_max")
+    has_item_limit = any(item.get("max_price_per_item") is not None for item in items)
+    if spending.get("total_price_max") is None and not has_item_limit:
+        missing.append("spending.total_price_max_or_item_limit")
     if spending.get("currency") is None:
         missing.append("spending.currency")
-    if spending.get("per_period_purchase_price_max") is None:
-        missing.append("spending.per_period_purchase_price_max")
-    if spending.get("period_in_days") is None:
-        missing.append("spending.period_in_days")
+    if spending.get("period_in_days") is not None and spending.get("total_price_max") is None:
+        missing.append("spending.total_price_max")
 
     return missing
 
@@ -232,6 +262,8 @@ def parse_policy(request: PolicyRequest) -> PolicyResponse:
     parsed_draft = parse_with_llm(combined_text)
     
     draft_dict = parsed_draft.model_dump()
+    products = draft_dict.setdefault("products", {})
+    products["items"] = merge_duplicate_items(products.get("items") or []) or None
     order_terms = draft_dict.setdefault("order_terms", {})
     if order_terms.get("require_returnable") is None:
         order_terms["require_returnable"] = True
