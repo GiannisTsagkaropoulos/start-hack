@@ -17,6 +17,7 @@ import {
   ParsedPolicyDraft,
   VERDICT_STORAGE_KEY,
   WalletPolicy,
+  readErrorMessage,
 } from "@/lib/viseca-control-layer";
 
 function toWalletPolicy(draft: ParsedPolicyDraft): WalletPolicy {
@@ -43,7 +44,11 @@ function toWalletPolicy(draft: ParsedPolicyDraft): WalletPolicy {
       trusted_devices_only: draft.session.trusted_devices_only as boolean,
       domestic_only: draft.session.domestic_only,
     },
-    duplicate_check: { block_repeats_within_minutes: null },
+    // Was previously hardcoded to null here, silently dropping whatever the
+    // parser found or the customer entered on review.
+    duplicate_check: {
+      block_repeats_within_minutes: draft.duplicate_check?.block_repeats_within_minutes ?? null,
+    },
     notes_for_customer: draft.notes_for_customer ?? "",
   };
 }
@@ -84,6 +89,9 @@ const DEFAULT_POLICY: ParsedPolicyDraft = {
     max_recent_attempts_10m: null,
     trusted_devices_only: true,
     domestic_only: null,
+  },
+  duplicate_check: {
+    block_repeats_within_minutes: null,
   },
   notes_for_customer: "",
 };
@@ -155,7 +163,7 @@ export default function WalletPage() {
         }),
       });
 
-      if (!res.ok) throw new Error("Failed to parse the policy.");
+      if (!res.ok) throw new Error(await readErrorMessage(res, "Failed to parse the policy."));
 
       const data = (await res.json()) as ParsePolicyResponse;
       setDraftPolicy(data.policy);
@@ -190,8 +198,7 @@ export default function WalletPage() {
       });
 
       if (!confirmRes.ok) {
-        const errData = await confirmRes.json();
-        throw new Error(errData.detail?.[0]?.msg || "Validation failed.");
+        throw new Error(await readErrorMessage(confirmRes, "The policy could not be confirmed."));
       }
 
       const decisionRes = await fetch(`${API_URL}/decision`, {
@@ -204,8 +211,9 @@ export default function WalletPage() {
       });
 
       if (!decisionRes.ok) {
-        const errData = await decisionRes.json();
-        throw new Error(errData.detail?.[0]?.msg || "Could not classify a purchase against this policy.");
+        throw new Error(
+          await readErrorMessage(decisionRes, "Could not classify a purchase against this policy."),
+        );
       }
 
       const verdict = await decisionRes.json();
@@ -545,6 +553,23 @@ export default function WalletPage() {
                     }
                     required
                     needsAttention={isUnknown("session.domestic_only")}
+                  />
+                </SectionBlock>
+
+                {/* 6. Duplicate Purchase Check - optional, but preserved from the
+                    parsed draft instead of silently discarded on confirm. */}
+                <SectionBlock title="6. Duplicate Purchase Check">
+                  <InputField
+                    label="Block repeat purchases within (minutes)"
+                    type="number"
+                    value={draftPolicy.duplicate_check?.block_repeats_within_minutes ?? ""}
+                    placeholder="No limit"
+                    onChange={(val) =>
+                      updatePolicyValue(
+                        "duplicate_check.block_repeats_within_minutes",
+                        val ? parseInt(val) : null,
+                      )
+                    }
                   />
                 </SectionBlock>
               </div>
