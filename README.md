@@ -16,6 +16,22 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Wallet control prototype
+
+The wallet policy interaction is available at [http://localhost:3000/wallet](http://localhost:3000/wallet).
+The frontend expects the FastAPI service at `http://localhost:8000` by default. Start it in a
+second terminal from the project root:
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+Set `NEXT_PUBLIC_API_URL` if the API is running somewhere else.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
