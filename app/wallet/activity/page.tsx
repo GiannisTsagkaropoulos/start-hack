@@ -1,22 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ShieldBan } from "lucide-react";
+import { Check, X, HelpCircle, Lock } from "lucide-react";
 import { AuthorityPanel, WalletPolicy } from "@/components/wallet/AuthorityPanel";
 
 /**
- * CONVERGED DIRECTION — composed from three prototyped concepts
- * (see /design-lab/b, /design-lab/c for the discarded-but-cannibalized siblings):
- *
- *  - Persistent split trust plane (from Concept C) is the page architecture:
- *    left = pinned human authority, right = everything outside the boundary.
- *  - The causal comparison chain (Concept A / D2) lives inside the right
- *    plane as the content that explains WHY.
- *  - A decline is stamped directly on the transaction record (Concept B),
- *    not shown as a generic colored badge — reserved for decline only,
- *    because a stamp implies enforcement, not just a status.
- *
  * PRESENTATION STATE vs DECISION DATA stay separate: DecisionResult mirrors
  * Jafar's real evaluate_hard_rules() response (INTEGRATION_CONTRACT.md).
  */
@@ -47,22 +36,30 @@ const SCENARIOS = [
   { id: "AU0016", name: "Unstated return policy" },
 ];
 
-// Representative fallback if no confirmed wallet exists in this browser yet
-// (e.g. this screen was opened directly, without going through /wallet first).
 const FALLBACK_POLICY: WalletPolicy = {
   spending: { per_item_purchase_price_max: 120, currency: "CHF" },
   order_terms: { require_returnable: true },
   session: { trusted_devices_only: true },
 };
 
+function usePrefersReducedMotion() {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setReduced(mq.matches);
+  }, []);
+  return reduced;
+}
+
 export default function ActivityPage() {
   const [activeId, setActiveId] = useState("AU0040");
   const [walletId, setWalletId] = useState<string | null>(null);
   const [policy, setPolicy] = useState<WalletPolicy>(FALLBACK_POLICY);
+  // "entering" -> "checking" -> "resolved" — the boundary sequence, ~0.9s total
+  const [phase, setPhase] = useState<"entering" | "checking" | "resolved">("resolved");
+  const reducedMotion = usePrefersReducedMotion();
+  const timers = useRef<number[]>([]);
 
-  // Design-prototype bridge only (see wallet/page.tsx) — reads the policy that
-  // was actually confirmed in this browser, if any. Not a real fetch from a
-  // backend, because no persisted-policy endpoint exists yet.
   useEffect(() => {
     for (let id = 0; id < 32; id++) {
       try {
@@ -78,129 +75,161 @@ export default function ActivityPage() {
     }
   }, []);
 
+  useEffect(() => {
+    timers.current.forEach(clearTimeout);
+    if (reducedMotion) {
+      setPhase("resolved");
+      return;
+    }
+    setPhase("entering");
+    timers.current = [
+      window.setTimeout(() => setPhase("checking"), 350),
+      window.setTimeout(() => setPhase("resolved"), 750),
+    ];
+    return () => timers.current.forEach(clearTimeout);
+  }, [activeId, reducedMotion]);
+
   const { purchase, result } = FIXTURES[activeId];
   const ruleMax = policy.spending?.per_item_purchase_price_max ?? 120.0;
   const overLimit = purchase.billing_amount_chf > ruleMax;
 
   return (
-    <div className="min-h-screen flex flex-col lg:flex-row bg-[#f7f9f7] text-slate-900">
-      {/* Left plane — pinned human authority. The exact same AuthorityPanel
-          rendered at the end of the mandate flow, fed the same policy, not a
-          re-styled duplicate. */}
-      <div className="lg:w-[36%]">
-        <AuthorityPanel
-          walletId={walletId ?? "7"}
-          policy={policy}
-          pinned
-          footer={
-            <p className="text-[11px] text-slate-500 leading-relaxed">
-              Nothing on the right can edit this. Only a decision — approve,
-              decline, or a question back to you — ever crosses over.
-            </p>
-          }
-        />
-      </div>
+    <div className="min-h-screen bg-[#f7f9f7] text-slate-900 lg:flex lg:items-center">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-5 py-6 sm:px-8 lg:flex-row lg:items-start">
+        {/* Left rail — sized to its content, sticky, never artificially stretched
+            to fill the viewport just because that's what a sidebar "should" do. */}
+        <div className="lg:sticky lg:top-6 lg:w-[260px] lg:shrink-0">
+          <Link href="/" className="mb-4 inline-block text-base font-bold text-slate-800">
+            Leash
+          </Link>
+          <AuthorityPanel
+            walletId={walletId ?? "7"}
+            policy={policy}
+            footer={
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Only a decision ever crosses back to this side.
+              </p>
+            }
+          />
+        </div>
 
-      {/* Right plane — everything outside the boundary: agent + merchant + decision */}
-      <section className="flex-1 p-6 sm:p-8">
-        <div className="flex items-center justify-between gap-4 mb-6">
-          <div>
-            <Link href="/" className="text-lg font-bold text-slate-800 mb-1 inline-block">
-              Leash
-            </Link>
+        {/* Right — one unified decision surface, not four separate boxes */}
+        <div className="flex-1 min-w-0">
+          <div className="mb-4 flex items-center justify-between gap-3">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-              Agent activity — outside the boundary
+              Purchase attempts
             </p>
+            <span className="shrink-0 rounded-full border border-slate-300 px-2 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wide text-slate-400">
+              Fixture data
+            </span>
           </div>
-          <span className="shrink-0 rounded-full border border-slate-300 px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-            Fixture data
-          </span>
-        </div>
 
-        <div className="mb-6 flex items-center gap-1.5 overflow-x-auto rounded-xl bg-slate-100 p-1 text-sm max-w-md">
-          {SCENARIOS.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => setActiveId(s.id)}
-              className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-2 font-medium transition-colors ${
-                activeId === s.id ? "bg-white shadow-sm text-slate-900" : "text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              {s.name}
-            </button>
-          ))}
-        </div>
+          <div className="mb-5 flex items-center gap-1 overflow-x-auto rounded-lg bg-slate-100 p-1 text-sm w-fit max-w-full">
+            {SCENARIOS.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => setActiveId(s.id)}
+                className={`shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 font-medium transition-colors ${
+                  activeId === s.id ? "bg-white shadow-sm text-slate-900" : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                {s.name}
+              </button>
+            ))}
+          </div>
 
-        <div className="max-w-md space-y-3">
-          <div className="rounded-2xl border border-slate-200 bg-white p-4">
-            <div className="flex items-baseline justify-between mb-1">
-              <span className="text-2xl font-bold tabular-nums">CHF {purchase.billing_amount_chf.toFixed(2)}</span>
-              <span className="font-mono text-xs text-slate-400">{purchase.authorization_id}</span>
+          <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+            {/* Purchase header */}
+            <div className="flex items-baseline justify-between px-5 pt-4 pb-3 border-b border-slate-100">
+              <span className="text-xl font-bold tabular-nums">CHF {purchase.billing_amount_chf.toFixed(2)}</span>
+              <span className="text-sm text-slate-500">{purchase.merchant_name}</span>
             </div>
-            <p className="text-sm text-slate-500">{purchase.merchant_name}</p>
-          </div>
 
-          <div className="relative ml-6 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3 pr-4">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">merchant item text</p>
-            <p className="text-xs text-slate-500 italic leading-relaxed">"{purchase.item_text}"</p>
-            <div className="absolute -left-6 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center rounded-full bg-white border border-slate-300 text-slate-400">
-              <ShieldBan size={12} />
-            </div>
-          </div>
-
-          <div className="flex flex-col items-start pl-1">
-            <div className="h-4 w-px bg-slate-300" />
-            <p className="text-[11px] text-slate-400 my-0.5">
-              {result.decision === "step_up"
-                ? "required fact is unstated for this item"
-                : `CHF ${purchase.billing_amount_chf.toFixed(2)} is ${overLimit ? "outside" : "within"} your confirmed CHF ${ruleMax.toFixed(2)} limit`}
-            </p>
-            <div className="h-4 w-px bg-slate-300" />
-          </div>
-
-          {/* Terminal state — decline gets a stamp on the record, not a generic badge */}
-          {result.decision === "decline" ? (
-            <div className="relative rounded-2xl border border-slate-200 bg-white p-4 overflow-hidden">
-              <div className="flex items-baseline justify-between mb-1 opacity-40">
-                <span className="text-2xl font-bold line-through decoration-red-400 tabular-nums">
-                  CHF {purchase.billing_amount_chf.toFixed(2)}
-                </span>
-              </div>
-              <p className="text-sm text-slate-400">{purchase.merchant_name}</p>
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 rotate-[-6deg] border-2 border-red-500 text-red-500 font-bold text-xs px-3 py-1.5 rounded">
-                DECLINED — OVER CHF {ruleMax.toFixed(0)} LIMIT
+            {/* Merchant text — the untrusted-data boundary sequence */}
+            <div className="px-5 py-3 border-b border-slate-100">
+              <div
+                className={`rounded-lg border border-dashed px-3 py-2 transition-all duration-300 ${
+                  phase === "entering"
+                    ? "border-slate-300 bg-slate-50 translate-x-0 opacity-100"
+                    : phase === "checking"
+                      ? "border-amber-300 bg-amber-50/60"
+                      : "border-slate-200 bg-slate-50/60 opacity-70"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">
+                    merchant text — not authority
+                  </p>
+                  {phase !== "resolved" && (
+                    <Lock size={11} className={phase === "checking" ? "text-amber-500" : "text-slate-300"} />
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 italic leading-relaxed">"{purchase.item_text}"</p>
               </div>
             </div>
-          ) : (
+
+            {/* Comparison — the numbers doing the arguing, not adjectives */}
             <div
-              className={`rounded-2xl border-2 p-4 ${
-                result.decision === "approve" ? "bg-emerald-50 border-emerald-300" : "bg-amber-50 border-amber-300"
+              className={`flex items-center justify-center gap-4 px-5 py-4 border-b border-slate-100 transition-opacity duration-300 ${
+                phase === "entering" ? "opacity-0" : "opacity-100"
               }`}
             >
-              <p className={`text-lg font-bold ${result.decision === "approve" ? "text-emerald-700" : "text-amber-700"}`}>
-                {result.decision === "approve" ? "Approved" : "Asking you directly"}
-              </p>
-              <p className="text-sm text-slate-600">
-                {result.decision === "approve"
-                  ? "Inside every rule you set. No interruption needed."
-                  : "A fact this rule depends on is genuinely unknown."}
-              </p>
+              <div className="text-center">
+                <p className="text-[9px] uppercase tracking-wide text-slate-400 mb-0.5">attempted</p>
+                <p className={`text-lg font-bold tabular-nums ${overLimit ? "text-red-600" : "text-slate-800"}`}>
+                  CHF {purchase.billing_amount_chf.toFixed(2)}
+                </p>
+              </div>
+              <span className="text-slate-300 text-sm font-mono">
+                {result.decision === "step_up" ? "?" : overLimit ? ">" : "≤"}
+              </span>
+              <div className="text-center">
+                <p className="text-[9px] uppercase tracking-wide text-slate-400 mb-0.5">your limit</p>
+                <p className="text-lg font-bold tabular-nums text-slate-800">CHF {ruleMax.toFixed(2)}</p>
+              </div>
             </div>
-          )}
 
-          <details className="group pl-1">
-            <summary className="cursor-pointer text-xs font-semibold text-slate-500 hover:text-slate-700 list-none flex items-center gap-1">
-              Evidence <span className="group-open:rotate-90 transition-transform">›</span>
-            </summary>
-            <div className="mt-2 space-y-1 font-mono text-[11px] text-slate-500">
-              {result.evidence.map((e, i) => (
-                <div key={i}>{e.field} {e.operator} {e.expected} — was {e.actual ?? "unknown"} ({e.status})</div>
-              ))}
-              <div className="text-slate-400">engine: {result.engine_version}</div>
-            </div>
-          </details>
+            {/* Verdict — one shape, three colors, never three different layouts */}
+            <VerdictBanner result={result} visible={phase === "resolved"} />
+
+            <details className="group px-5 py-3 bg-slate-50/50">
+              <summary className="cursor-pointer text-[11px] font-semibold text-slate-400 hover:text-slate-600 list-none flex items-center gap-1">
+                Evidence <span className="group-open:rotate-90 transition-transform">›</span>
+              </summary>
+              <div className="mt-2 space-y-1 font-mono text-[10px] text-slate-400">
+                <div>{purchase.authorization_id} · engine {result.engine_version}</div>
+                {result.evidence.map((e, i) => (
+                  <div key={i}>{e.field} {e.operator} {e.expected} — was {e.actual ?? "unknown"} ({e.status})</div>
+                ))}
+              </div>
+            </details>
+          </div>
         </div>
-      </section>
+      </div>
+    </div>
+  );
+}
+
+function VerdictBanner({ result, visible }: { result: DecisionResult; visible: boolean }) {
+  const meta = {
+    approve: { icon: Check, label: "Approved", sub: "Inside every rule you set.", color: "text-emerald-700", bar: "bg-emerald-500", bg: "bg-emerald-50" },
+    decline: { icon: X, label: "Declined", sub: "Outside the authority you confirmed.", color: "text-red-700", bar: "bg-red-500", bg: "bg-red-50" },
+    step_up: { icon: HelpCircle, label: "Asking you directly", sub: "A fact this rule depends on is unknown.", color: "text-amber-700", bar: "bg-amber-500", bg: "bg-amber-50" },
+  }[result.decision];
+  const Icon = meta.icon;
+
+  return (
+    <div
+      className={`flex items-center gap-3 px-5 py-3.5 transition-opacity duration-300 ${meta.bg} ${
+        visible ? "opacity-100" : "opacity-0"
+      }`}
+    >
+      <div className={`h-full w-1 self-stretch rounded-full ${meta.bar} shrink-0`} style={{ minHeight: "2rem" }} />
+      <Icon className={meta.color} size={18} />
+      <div>
+        <p className={`text-sm font-bold ${meta.color}`}>{meta.label}</p>
+        <p className="text-xs text-slate-500">{meta.sub}</p>
+      </div>
     </div>
   );
 }

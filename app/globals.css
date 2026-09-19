@@ -37,3 +37,24 @@ button:focus-visible,
   outline: 2px solid #10b981;
   outline-offset: 2px;
 }
+
+/* The moment structured constraints become granted authority - a short,
+   restrained entrance, not a form Submit. ~350ms, respects reduced motion. */
+@keyframes grant-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.grant-in {
+  animation: grant-in 0.35s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .grant-in {
+    animation: none;
+  }
+}

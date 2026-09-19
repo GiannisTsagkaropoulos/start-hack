@@ -6,7 +6,6 @@ import {
   AlertCircle,
   ArrowLeft,
   ArrowRight,
-  Check,
   Lock,
   ShieldCheck,
 } from "lucide-react";
@@ -307,9 +306,9 @@ export default function WalletPage() {
                 </h1>
               </div>
 
-              {/* One transformation, one container: their words become structured
-                  rules in the same visual object, not two separate boxes the
-                  eye has to reconcile on its own. */}
+              {/* Once granted, the working copy disappears — the AuthorityPanel
+                  below is the result, not a summary stacked on top of the form. */}
+              {!isConfirmed && (
               <div className="rounded-2xl border-2 border-slate-200 bg-white overflow-hidden">
                 <div className="px-6 pt-5 pb-4 bg-slate-50/80">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 mb-1.5">
@@ -324,92 +323,117 @@ export default function WalletPage() {
                   <ArrowRight size={14} className="text-slate-300 rotate-90" />
                   <div className="h-px flex-1 bg-slate-200" />
                 </div>
-                <div className="px-6 pt-4 pb-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 mb-1">
-                    We understood
-                  </p>
-                </div>
-                <div className="divide-y divide-slate-100 px-6 pb-2">
-                  <ReviewRow
-                    label={FIELD_LABELS["spending.per_item_purchase_price_max"]}
-                    isMissing={missingFields.includes("spending.per_item_purchase_price_max")}
-                  >
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        value={draftPolicy.spending?.per_item_purchase_price_max ?? ""}
-                        placeholder="e.g. 120"
-                        onChange={(e) =>
-                          updatePolicyValue(
-                            "spending.per_item_purchase_price_max",
-                            e.target.value ? parseFloat(e.target.value) : null,
-                          )
-                        }
-                        className="w-28 rounded-lg border border-slate-300 px-3 py-1.5 text-right font-mono outline-none focus:border-emerald-500"
-                      />
-                      <select
-                        value={draftPolicy.spending?.currency || "CHF"}
-                        onChange={(e) => updatePolicyValue("spending.currency", e.target.value || null)}
-                        className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 outline-none focus:border-emerald-500"
-                      >
-                        <option value="CHF">CHF</option>
-                        <option value="USD">USD</option>
-                        <option value="EUR">EUR</option>
-                      </select>
-                    </div>
-                  </ReviewRow>
-                  <ReviewRow
-                    label={FIELD_LABELS["spending.per_period_purchase_price_max"]}
-                    isMissing={missingFields.includes("spending.per_period_purchase_price_max")}
-                  >
-                    <input
-                      type="number"
-                      value={draftPolicy.spending?.per_period_purchase_price_max ?? ""}
-                      placeholder="None"
-                      onChange={(e) =>
-                        updatePolicyValue(
-                          "spending.per_period_purchase_price_max",
-                          e.target.value ? parseFloat(e.target.value) : null,
-                        )
-                      }
-                      className="w-32 rounded-lg border border-slate-300 px-3 py-1.5 text-right font-mono outline-none focus:border-emerald-500"
-                    />
-                  </ReviewRow>
-                  <ToggleRow
-                    label={FIELD_LABELS["merchant.familiarity_required"]}
-                    value={draftPolicy.merchant?.familiarity_required}
-                    isMissing={missingFields.includes("merchant.familiarity_required")}
-                    onChange={(v) => updatePolicyValue("merchant.familiarity_required", v)}
-                  />
-                  <ToggleRow
-                    label={FIELD_LABELS["order_terms.require_returnable"]}
-                    value={draftPolicy.order_terms?.require_returnable}
-                    isMissing={missingFields.includes("order_terms.require_returnable")}
-                    onChange={(v) => updatePolicyValue("order_terms.require_returnable", v)}
-                  />
-                  <ToggleRow
-                    label={FIELD_LABELS["order_terms.require_cancellable"]}
-                    value={draftPolicy.order_terms?.require_cancellable}
-                    isMissing={missingFields.includes("order_terms.require_cancellable")}
-                    onChange={(v) => updatePolicyValue("order_terms.require_cancellable", v)}
-                  />
-                  <ToggleRow
-                    label={FIELD_LABELS["session.domestic_only"]}
-                    value={draftPolicy.session?.domestic_only}
-                    isMissing={missingFields.includes("session.domestic_only")}
-                    onChange={(v) => updatePolicyValue("session.domestic_only", v)}
-                  />
-                </div>
-              </div>
 
-              {missingFields.length > 0 && (
-                <ExternalBlock eyebrow="We're not guessing at these — tell us or we'll ask you every time">
+                {/* Active rules dominate; unspecified ones recede behind a
+                    single disclosure instead of a wall of repeated badges. */}
+                {(() => {
+                  const fields: { key: string; label: string; kind: "amount" | "bool"; value: any }[] = [
+                    { key: "spending.per_item_purchase_price_max", label: "Maximum per item", kind: "amount", value: draftPolicy.spending?.per_item_purchase_price_max },
+                    { key: "spending.per_period_purchase_price_max", label: "Maximum per period", kind: "amount", value: draftPolicy.spending?.per_period_purchase_price_max },
+                    { key: "merchant.familiarity_required", label: FIELD_LABELS["merchant.familiarity_required"], kind: "bool", value: draftPolicy.merchant?.familiarity_required },
+                    { key: "order_terms.require_returnable", label: FIELD_LABELS["order_terms.require_returnable"], kind: "bool", value: draftPolicy.order_terms?.require_returnable },
+                    { key: "order_terms.require_cancellable", label: FIELD_LABELS["order_terms.require_cancellable"], kind: "bool", value: draftPolicy.order_terms?.require_cancellable },
+                    { key: "session.domestic_only", label: FIELD_LABELS["session.domestic_only"], kind: "bool", value: draftPolicy.session?.domestic_only },
+                  ];
+                  const active = fields.filter((f) => f.value !== null && f.value !== undefined);
+                  const unspecified = fields.filter((f) => f.value === null || f.value === undefined);
+
+                  return (
+                    <>
+                      <div className="px-6 pt-4 pb-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-600 mb-1">
+                          {active.length} active rule{active.length === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                      {active.length > 0 ? (
+                        <div className="divide-y divide-slate-100 px-6 pb-2">
+                          {active.map((f) =>
+                            f.key === "spending.per_item_purchase_price_max" ? (
+                              <ReviewRow key={f.key} label={f.label}>
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="number"
+                                    value={draftPolicy.spending?.per_item_purchase_price_max ?? ""}
+                                    onChange={(e) => updatePolicyValue("spending.per_item_purchase_price_max", e.target.value ? parseFloat(e.target.value) : null)}
+                                    className="w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-right font-mono font-semibold outline-none focus:border-emerald-500"
+                                  />
+                                  <select
+                                    value={draftPolicy.spending?.currency || "CHF"}
+                                    onChange={(e) => updatePolicyValue("spending.currency", e.target.value || null)}
+                                    className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 outline-none focus:border-emerald-500"
+                                  >
+                                    <option value="CHF">CHF</option>
+                                    <option value="USD">USD</option>
+                                    <option value="EUR">EUR</option>
+                                  </select>
+                                </div>
+                              </ReviewRow>
+                            ) : f.key === "spending.per_period_purchase_price_max" ? (
+                              <ReviewRow key={f.key} label={f.label}>
+                                <input
+                                  type="number"
+                                  value={draftPolicy.spending?.per_period_purchase_price_max ?? ""}
+                                  onChange={(e) => updatePolicyValue("spending.per_period_purchase_price_max", e.target.value ? parseFloat(e.target.value) : null)}
+                                  className="w-28 rounded-lg border border-slate-300 px-3 py-1.5 text-right font-mono font-semibold outline-none focus:border-emerald-500"
+                                />
+                              </ReviewRow>
+                            ) : (
+                              <ToggleRow
+                                key={f.key}
+                                label={f.label}
+                                value={draftPolicy[f.key.split(".")[0]]?.[f.key.split(".")[1]]}
+                                onChange={(v) => updatePolicyValue(f.key, v)}
+                              />
+                            ),
+                          )}
+                        </div>
+                      ) : (
+                        <p className="px-6 pb-3 text-sm text-slate-400">
+                          Nothing specific yet — every purchase will ask you directly.
+                        </p>
+                      )}
+
+                      {unspecified.length > 0 && (
+                        <details className="group border-t border-slate-100 px-6 py-3">
+                          <summary className="cursor-pointer text-xs font-semibold text-slate-400 hover:text-slate-600 list-none flex items-center gap-1">
+                            {unspecified.length} unspecified — click to set
+                            <span className="group-open:rotate-90 transition-transform">›</span>
+                          </summary>
+                          <div className="divide-y divide-slate-100 mt-2">
+                            {unspecified.map((f) =>
+                              f.kind === "amount" ? (
+                                <ReviewRow key={f.key} label={f.label}>
+                                  <input
+                                    type="number"
+                                    placeholder="None"
+                                    onChange={(e) => updatePolicyValue(f.key, e.target.value ? parseFloat(e.target.value) : null)}
+                                    className="w-28 rounded-lg border border-slate-300 px-3 py-1.5 text-right font-mono outline-none focus:border-emerald-500"
+                                  />
+                                </ReviewRow>
+                              ) : (
+                                <ToggleRow
+                                  key={f.key}
+                                  label={f.label}
+                                  value={null}
+                                  onChange={(v) => updatePolicyValue(f.key, v)}
+                                />
+                              ),
+                            )}
+                          </div>
+                        </details>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+              )}
+
+              {!isConfirmed && missingFields.length > 0 && (
+                <ExternalBlock eyebrow="We're not guessing — anything unset means we'll ask you">
                   <div className="space-y-3">
                     <p className="text-sm text-amber-900">
-                      {missingFields.length} rule{missingFields.length > 1 ? "s" : ""} above
-                      {missingFields.length > 1 ? " are" : " is"} still unset. Anything left
-                      blank means the agent will pause and ask you directly the first time it
-                      matters, instead of us assuming an answer.
+                      Anything left blank means the agent pauses and asks you directly the
+                      first time it matters, instead of assuming an answer.
                     </p>
                     <div className="flex gap-2">
                       <input
@@ -460,24 +484,26 @@ export default function WalletPage() {
                 // policy that was just confirmed. This is what makes mandate
                 // creation and purchase evaluation feel like one continuous
                 // territory instead of two different screens.
-                <AuthorityPanel
-                  walletId={walletId}
-                  policy={draftPolicy}
-                  footer={
-                    <div>
-                      <div className="flex items-center gap-2 text-sm text-emerald-300 mb-3">
-                        <ShieldCheck size={16} />
-                        <span>Active — every purchase attempt is checked against this</span>
+                <div className="grant-in">
+                  <AuthorityPanel
+                    walletId={walletId}
+                    policy={draftPolicy}
+                    footer={
+                      <div>
+                        <div className="flex items-center gap-2 text-sm text-emerald-300 mb-3">
+                          <ShieldCheck size={16} />
+                          <span>Active — every purchase attempt is checked against this</span>
+                        </div>
+                        <Link
+                          href="/wallet/activity"
+                          className="inline-flex items-center gap-2 text-sm font-semibold text-white hover:text-emerald-200"
+                        >
+                          See how a purchase gets checked against this <ArrowRight size={14} />
+                        </Link>
                       </div>
-                      <Link
-                        href="/wallet/activity"
-                        className="inline-flex items-center gap-2 text-sm font-semibold text-white hover:text-emerald-200"
-                      >
-                        See how a purchase gets checked against this <ArrowRight size={14} />
-                      </Link>
-                    </div>
-                  }
-                />
+                    }
+                  />
+                </div>
               )}
 
               {error && <ErrorMessage message={error} />}
