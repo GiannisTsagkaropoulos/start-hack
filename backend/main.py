@@ -273,7 +273,10 @@ def confirm_policy(request: ConfirmationRequest) -> ConfirmationResponse:
 
     return ConfirmationResponse(
         success=True,
-        message="Wallet policy validated and saved.",
+        # No durable storage exists yet: this validates the policy against the
+        # strict schema and confirms it for the current session only. /decision
+        # requires the caller to resend the full policy - see decision_engine.py.
+        message="Wallet policy validated and confirmed for this session.",
         walletId=request.wallet_id,
     )
 

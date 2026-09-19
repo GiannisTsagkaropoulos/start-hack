@@ -1,14 +1,14 @@
 /**
- * Contract copied from VisecaControlLayer/api.py and its mandate JSON schemas.
- *
- * `parse-policy` currently returns `ParsedPolicyDraft`. `confirm-policy`
- * deliberately accepts `LocalMandateV2` instead, so a draft cannot be
- * confirmed until the control layer returns / transforms it into a v2 mandate.
+ * Contract verified directly against the running backend/main.py in this
+ * repo (Schema/DraftSchema/PolicyResponse/ConfirmationResponse/DecisionRequest).
+ * This file previously also described a `LocalMandateV2` shape and a richer
+ * confirm-policy response; neither is what backend/main.py actually returns
+ * on this branch, so both were removed rather than left to mislead whoever
+ * reads this file next. If a real production mandate contract is delivered
+ * later, it belongs in a new, separately-named type - not bolted onto these.
  */
 
 export type Currency = "CHF" | "USD" | "EUR";
-export type ConstraintState = "unrestricted" | "required";
-export type UncertaintyPolicy = "ask" | "decline" | "approve";
 
 export interface ParsePolicyRequest {
   /** Integer from 0 through 31, inclusive. */
@@ -42,106 +42,26 @@ export interface ParsedPolicyDraft {
     trusted_devices_only: boolean | null;
     domestic_only: boolean | null;
   };
+  duplicate_check: {
+    block_repeats_within_minutes: number | null;
+  };
   notes_for_customer: string | null;
 }
 
+/** Exact `PolicyResponse` returned by `POST /parse-policy` - no more, no less. */
 export interface ParsePolicyResponse {
   walletId: number;
   policy: ParsedPolicyDraft;
   missingFields: string[];
-  defaultsApplied: Record<string, unknown>;
   complete: boolean;
-  reasoning: string[] | null;
 }
 
-export interface StateValue {
-  state: ConstraintState;
-  value: number | null;
-}
-
-export interface StateValues<T extends string = string> {
-  state: ConstraintState;
-  values: T[];
-}
-
-export interface ItemMatcher {
-  match_mode: "exact_item_id" | "name_and_category" | "category_only";
-  item_id: string | null;
-  name_contains: string | null;
-  category: string | null;
-  attributes: Array<{ name: string; value: string }>;
-}
-
-/** Exact local-v2 policy required by `POST /confirm-policy`. */
-export interface LocalMandateV2 {
-  mandate_id: string;
-  raw_instruction: string;
-  policy_version: 2;
-  uncertainty_policy: UncertaintyPolicy;
-  spending: {
-    per_purchase: { state: ConstraintState; max_chf: number | null };
-    rolling_period: { state: ConstraintState; max_chf: number | null; days: number | null };
-  };
-  cart: {
-    allowed_categories: StateValues;
-    denied_categories: StateValues;
-    requested_items: ItemMatcher[];
-    max_distinct_lines: StateValue;
-    max_total_quantity: StateValue;
-    allow_substitutions: boolean;
-    allow_unrequested_add_ons: boolean;
-  };
-  merchant: {
-    allowlist_ids: string[];
-    blocklist_ids: string[];
-    required_categories: StateValues;
-    required_mccs: StateValues;
-    familiarity: { state: ConstraintState; minimum_prior_approved: number | null };
-  };
-  order_terms: {
-    fulfillment_methods: StateValues;
-    returnable: ConstraintState;
-    min_return_window_days: StateValue;
-    cancellable: ConstraintState;
-  };
-  session: {
-    trusted_device: "unrestricted" | "required" | "review";
-    max_recent_attempts_10m: StateValue;
-    domestic_only: "unrestricted" | "required" | "review";
-  };
-  prompt_injection_defense: true;
-}
-
-export interface ConfirmPolicyRequest {
-  wallet_id: number;
-  policy: LocalMandateV2;
-}
-
-export interface VisecaMandateRule {
-  field: string;
-  operator: "<" | "<=" | "=" | "!=" | ">" | ">=" | "in" | "not_in";
-  value: number | string | string[];
-  currency?: "CHF" | "EUR" | "GBP" | "USD" | null;
-  scope?: "purchase" | "period" | null;
-  period_days?: number | null;
-}
-
-export interface VisecaMandateDraft {
-  instruction: string;
-  hard_rules: VisecaMandateRule[];
-  uncertainty_policy: UncertaintyPolicy;
-  guidance: string[];
-  open_questions: string[];
-}
-
+/** Exact `ConfirmationResponse` returned by `POST /confirm-policy` - no more, no less.
+ *  Confirmation only; no mandate, no persistence, no model response is returned. */
 export interface ConfirmPolicyResponse {
   success: boolean;
   message: string;
   walletId: number;
-  mandate: LocalMandateV2;
-  visecaMandate: VisecaMandateDraft;
-  modelResponse: { policyVersion: number; mandateId: string };
-  reasoning: string[] | null;
 }
 
 /** Exact `ConfirmationRequest.policy` / `DecisionRequest.policy` shape the local backend accepts. */
@@ -203,72 +123,56 @@ export interface DecisionResponse {
   engine_version: "rule-classifier-v2";
 }
 
-const unrestricted = (): StateValue => ({ state: "unrestricted", value: null });
-
 /**
- * Adapts the editable legacy parse response to the strict local-v2 mandate
- * required by the confirmation endpoint. The backend's current two endpoint
- * schemas do not compose directly.
+ * Formats FastAPI's `detail` (a string, or a list of {loc/msg} or
+ * {field/reason} objects) into one human-readable line per error, e.g.
+ * "Currency: Field required." Falls back to null when nothing usable is
+ * found, so callers can supply their own generic message instead.
  */
-export function toLocalMandateV2(
-  draft: ParsedPolicyDraft,
-  fallbackInstruction: string,
-): LocalMandateV2 {
-  if (draft.spending.currency && draft.spending.currency !== "CHF") {
-    throw new Error("The confirmation API accepts CHF mandates only. Choose CHF before confirming.");
+export function formatValidationDetail(detail: unknown): string | null {
+  if (typeof detail === "string") return detail;
+  if (!Array.isArray(detail)) return null;
+
+  const messages = detail.flatMap((item) => {
+    if (typeof item !== "object" || item === null) return [];
+    const record = item as Record<string, unknown>;
+    const message =
+      typeof record.msg === "string"
+        ? record.msg
+        : typeof record.reason === "string"
+          ? record.reason
+          : typeof record.message === "string"
+            ? record.message
+            : null;
+    if (!message) return [];
+
+    const rawField = Array.isArray(record.loc)
+      ? record.loc.filter((part) => part !== "body").map(String).join(".")
+      : typeof record.field === "string"
+        ? record.field.replace(/^body\./, "")
+        : "";
+    const field = rawField.replace(/^policy\./, "");
+    return [field ? `${field}: ${message}` : message];
+  });
+
+  return messages.length > 0 ? messages.join(" ") : null;
+}
+
+export async function readErrorMessage(response: Response, fallback: string): Promise<string> {
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (contentType.includes("json")) {
+    const body: unknown = await response.json().catch(() => null);
+    if (typeof body === "object" && body !== null) {
+      const record = body as Record<string, unknown>;
+      const detail = formatValidationDetail(record.detail);
+      if (detail) return detail;
+      if (typeof record.message === "string") return record.message;
+    }
+  } else {
+    const body = await response.text().catch(() => "");
+    if (body.trim()) return body.trim();
   }
 
-  const perPurchase = draft.spending.per_item_purchase_price_max;
-  const periodMax = draft.spending.per_period_purchase_price_max;
-  const periodDays = draft.spending.period_in_days;
-  const familiarityMinimum = Math.max(1, draft.merchant.familiarity_min_prior_approved ?? 1);
-  const merchantIds = (ids: string[] | null) =>
-    (ids ?? []).filter((id) => /^ME\d{4}$/.test(id));
-
-  return {
-    mandate_id: "TM-PENDING-CONFIRMATION",
-    raw_instruction: draft.raw_instructions.trim() || fallbackInstruction,
-    policy_version: 2,
-    uncertainty_policy: "ask",
-    spending: {
-      per_purchase: perPurchase === null
-        ? { state: "unrestricted", max_chf: null }
-        : { state: "required", max_chf: perPurchase },
-      rolling_period: periodMax === null || periodDays === null
-        ? { state: "unrestricted", max_chf: null, days: null }
-        : { state: "required", max_chf: periodMax, days: periodDays },
-    },
-    cart: {
-      allowed_categories: { state: "unrestricted", values: [] },
-      denied_categories: { state: "unrestricted", values: [] },
-      requested_items: [],
-      max_distinct_lines: unrestricted(),
-      max_total_quantity: unrestricted(),
-      allow_substitutions: false,
-      allow_unrequested_add_ons: false,
-    },
-    merchant: {
-      allowlist_ids: merchantIds(draft.merchant.allowlist),
-      blocklist_ids: merchantIds(draft.merchant.blocklist),
-      required_categories: { state: "unrestricted", values: [] },
-      required_mccs: { state: "unrestricted", values: [] },
-      familiarity: draft.merchant.familiarity_required
-        ? { state: "required", minimum_prior_approved: familiarityMinimum }
-        : { state: "unrestricted", minimum_prior_approved: null },
-    },
-    order_terms: {
-      fulfillment_methods: { state: "unrestricted", values: [] },
-      returnable: draft.order_terms.require_returnable ? "required" : "unrestricted",
-      min_return_window_days: unrestricted(),
-      cancellable: draft.order_terms.require_cancellable ? "required" : "unrestricted",
-    },
-    session: {
-      trusted_device: draft.session.trusted_devices_only ? "required" : "unrestricted",
-      max_recent_attempts_10m: draft.session.max_recent_attempts_10m === null
-        ? unrestricted()
-        : { state: "required", value: draft.session.max_recent_attempts_10m },
-      domestic_only: draft.session.domestic_only ? "required" : "unrestricted",
-    },
-    prompt_injection_defense: true,
-  };
+  return `${fallback} (HTTP ${response.status})`;
 }

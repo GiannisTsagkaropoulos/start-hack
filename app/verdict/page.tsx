@@ -46,6 +46,7 @@ export default function VerdictPage() {
 
   const presentation = decisionStyle[verdict.decision];
   const Icon = presentation.Icon;
+  const hardEvidence = verdict.evidence.filter((item) => item.rule_type === "hard");
   const softCheckProblems = verdict.evidence.filter(
     (item) => item.rule_type === "soft" && item.status !== "pass",
   );
@@ -81,6 +82,22 @@ export default function VerdictPage() {
             <Icon size={20} /> {presentation.label}
           </div>
         </header>
+
+        {hardEvidence.length > 0 && (
+          <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="font-bold">Why</h2>
+            <div className="mt-3 space-y-2">
+              {hardEvidence.map((item, index) => (
+                <p
+                  key={`${item.field}-${index}`}
+                  className={`text-sm leading-6 ${item.status === "fail" ? "text-red-700 font-medium" : "text-slate-600"}`}
+                >
+                  {item.message}
+                </p>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="font-bold">Soft-check review</h2>

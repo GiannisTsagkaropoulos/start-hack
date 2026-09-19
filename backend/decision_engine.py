@@ -45,6 +45,18 @@ DEMO_PURCHASE = {
 }
 
 
+def get_purchase_to_evaluate() -> dict:
+    """The ONE seam to replace when a real purchase source exists.
+
+    Today this returns the fixed local demo purchase above. When the
+    sponsor's production purchase-evaluation transport is authoritative
+    (see docs/viseca-control-layer-contract.md), replace this function's
+    body with that call - evaluate_purchase()'s classification logic and
+    the DecisionResponse contract do not need to change.
+    """
+    return DEMO_PURCHASE
+
+
 def _count_prior_approved_merchant_purchases(card_id: str, merchant_id: str, before: datetime) -> int | None:
     if not os.path.exists(_HISTORY_CSV):
         return None
@@ -61,7 +73,8 @@ def _count_prior_approved_merchant_purchases(card_id: str, merchant_id: str, bef
     return count
 
 
-def evaluate_purchase(policy, purchase: dict = DEMO_PURCHASE) -> DecisionResponse:
+def evaluate_purchase(policy, purchase: dict | None = None) -> DecisionResponse:
+    purchase = purchase if purchase is not None else get_purchase_to_evaluate()
     evidence: list[DecisionEvidence] = []
     reason_codes: list[ReasonCode] = []
 
