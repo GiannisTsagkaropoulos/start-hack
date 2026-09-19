@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/viseca-api/mandate-draft.schema.json",
+  "title": "Viseca POST /v1/mandates request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["instruction", "hard_rules", "uncertainty_policy", "guidance", "open_questions"],
+  "properties": {
+    "instruction": {"type": "string", "minLength": 1},
+    "hard_rules": {"type": "array", "items": {"$ref": "#/$defs/mandate_rule"}},
+    "uncertainty_policy": {"enum": ["ask", "decline", "approve"]},
+    "guidance": {"type": "array", "items": {"type": "string"}},
+    "open_questions": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "mandate_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "operator", "value"],
+      "properties": {
+        "field": {"type": "string", "minLength": 1},
+        "operator": {"enum": ["<", "<=", "=", "!=", ">", ">=", "in", "not_in"]},
+        "value": {
+          "anyOf": [
+            {"type": "integer"},
+            {"type": "number"},
+            {"type": "string"},
+            {"type": "array", "items": {"type": "string"}}
+          ]
+        },
+        "currency": {"type": ["string", "null"], "enum": ["CHF", "EUR", "GBP", "USD", null]},
+        "scope": {"type": ["string", "null"], "enum": ["purchase", "period", null]},
+        "period_days": {"type": ["integer", "null"], "minimum": 1}
+      }
+    }
+  }
+}

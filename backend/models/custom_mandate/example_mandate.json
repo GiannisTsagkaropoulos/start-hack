@@ -1,0 +1,89 @@
+{
+  "mandate_id": "TM-PENDING-CONFIRMATION",
+  "raw_instruction": "Buy one ordinary grocery item for CHF 20 or less from a shop I use regularly. Ask me when uncertain.",
+  "policy_version": 2,
+  "uncertainty_policy": "ask",
+  "spending": {
+    "per_purchase": {
+      "state": "required",
+      "max_chf": 20
+    },
+    "rolling_period": {
+      "state": "unrestricted",
+      "max_chf": null,
+      "days": null
+    }
+  },
+  "cart": {
+    "allowed_categories": {
+      "state": "required",
+      "values": [
+        "groceries"
+      ]
+    },
+    "denied_categories": {
+      "state": "unrestricted",
+      "values": []
+    },
+    "requested_items": [
+      {
+        "match_mode": "category_only",
+        "item_id": null,
+        "name_contains": null,
+        "category": "groceries",
+        "attributes": []
+      }
+    ],
+    "max_distinct_lines": {
+      "state": "required",
+      "value": 1
+    },
+    "max_total_quantity": {
+      "state": "required",
+      "value": 1
+    },
+    "allow_substitutions": false,
+    "allow_unrequested_add_ons": false
+  },
+  "merchant": {
+    "allowlist_ids": [],
+    "blocklist_ids": [],
+    "required_categories": {
+      "state": "unrestricted",
+      "values": []
+    },
+    "required_mccs": {
+      "state": "unrestricted",
+      "values": []
+    },
+    "familiarity": {
+      "state": "required",
+      "minimum_prior_approved": 3
+    }
+  },
+  "order_terms": {
+    "fulfillment_methods": {
+      "state": "unrestricted",
+      "values": []
+    },
+    "returnable": "unrestricted",
+    "min_return_window_days": {
+      "state": "unrestricted",
+      "value": null
+    },
+    "cancellable": "unrestricted"
+  },
+  "session": {
+    "trusted_device": "unrestricted",
+    "max_recent_attempts_10m": {
+      "state": "unrestricted",
+      "value": null
+    },
+    "domestic_only": "unrestricted"
+  },
+  "duplicate_check": {
+    "state": "unrestricted",
+    "value": null
+  },
+  "prompt_injection_defense": true
+}

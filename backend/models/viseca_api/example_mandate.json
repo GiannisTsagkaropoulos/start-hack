@@ -1,0 +1,49 @@
+{
+  "instruction": "Buy one ordinary grocery item for CHF 20 or less from a shop I use regularly. Ask me when uncertain.",
+  "hard_rules": [
+    {
+      "field": "authorization.billing_amount_chf",
+      "operator": "<=",
+      "value": 20,
+      "currency": "CHF",
+      "scope": "purchase"
+    },
+    {
+      "field": "authorization.items.item_category",
+      "operator": "in",
+      "value": [
+        "groceries"
+      ]
+    },
+    {
+      "field": "authorization.items.count",
+      "operator": "<=",
+      "value": 1
+    },
+    {
+      "field": "authorization.items.total_quantity",
+      "operator": "<=",
+      "value": 1
+    },
+    {
+      "field": "authorization.cart.has_substitution",
+      "operator": "=",
+      "value": "false"
+    },
+    {
+      "field": "authorization.cart.has_unrequested_add_on",
+      "operator": "=",
+      "value": "false"
+    },
+    {
+      "field": "history.approved_merchant_transaction_count",
+      "operator": ">=",
+      "value": 3
+    }
+  ],
+  "uncertainty_policy": "ask",
+  "guidance": [
+    "Require requested item: category groceries."
+  ],
+  "open_questions": []
+}

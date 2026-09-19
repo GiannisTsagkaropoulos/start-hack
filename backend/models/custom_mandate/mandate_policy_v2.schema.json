@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/custom-mandate/mandate-policy-v2.schema.json",
+  "title": "Local product-aware mandate policy",
+  "description": "Backend-only policy evaluated against authorization.items, authorization.merchant, context, and authorization_history. This is not sent directly to Viseca.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mandate_id", "raw_instruction", "policy_version", "uncertainty_policy", "spending", "cart", "merchant", "order_terms", "session", "duplicate_check", "prompt_injection_defense"],
+  "properties": {
+    "mandate_id": {"type": "string"},
+    "raw_instruction": {"type": "string"},
+    "policy_version": {"const": 2},
+    "uncertainty_policy": {"enum": ["ask", "decline", "approve"]},
+    "spending": {
+      "type": "object", "additionalProperties": false,
+      "required": ["per_purchase", "rolling_period"],
+      "properties": {
+        "per_purchase": {"$ref": "#/$defs/money_constraint"},
+        "rolling_period": {"$ref": "#/$defs/rolling_money_constraint"}
+      }
+    },
+    "cart": {
+      "type": "object", "additionalProperties": false,
+      "required": ["allowed_categories", "denied_categories", "requested_items", "max_distinct_lines", "max_total_quantity", "allow_substitutions", "allow_unrequested_add_ons"],
+      "properties": {
+        "allowed_categories": {"$ref": "#/$defs/category_constraint"},
+        "denied_categories": {"$ref": "#/$defs/category_constraint"},
+        "requested_items": {"type": "array", "items": {"$ref": "#/$defs/item_matcher"}},
+        "max_distinct_lines": {"$ref": "#/$defs/integer_constraint"},
+        "max_total_quantity": {"$ref": "#/$defs/integer_constraint"},
+        "allow_substitutions": {"type": "boolean"},
+        "allow_unrequested_add_ons": {"type": "boolean"}
+      }
+    },
+    "merchant": {
+      "type": "object", "additionalProperties": false,
+      "required": ["allowlist_ids", "blocklist_ids", "required_categories", "required_mccs", "familiarity"],
+      "properties": {
+        "allowlist_ids": {"type": "array", "items": {"type": "string", "pattern": "^ME[0-9]{4}$"}},
+        "blocklist_ids": {"type": "array", "items": {"type": "string", "pattern": "^ME[0-9]{4}$"}},
+        "required_categories": {"$ref": "#/$defs/merchant_category_constraint"},
+        "required_mccs": {"$ref": "#/$defs/string_set_constraint"},
+        "familiarity": {
+          "type": "object", "additionalProperties": false,
+          "required": ["state", "minimum_prior_approved"],
+          "properties": {
+            "state": {"enum": ["unrestricted", "required"]},
+            "minimum_prior_approved": {"type": ["integer", "null"], "minimum": 1}
+          }
+        }
+      }
+    },
+    "order_terms": {
+      "type": "object", "additionalProperties": false,
+      "required": ["fulfillment_methods", "returnable", "min_return_window_days", "cancellable"],
+      "properties": {
+        "fulfillment_methods": {"$ref": "#/$defs/string_set_constraint"},
+        "returnable": {"enum": ["unrestricted", "required"]},
+        "min_return_window_days": {"$ref": "#/$defs/integer_constraint"},
+        "cancellable": {"enum": ["unrestricted", "required"]}
+      }
+    },
+    "session": {
+      "type": "object", "additionalProperties": false,
+      "required": ["trusted_device", "max_recent_attempts_10m", "domestic_only"],
+      "properties": {
+        "trusted_device": {"enum": ["unrestricted", "required", "review"]},
+        "max_recent_attempts_10m": {"$ref": "#/$defs/integer_constraint"},
+        "domestic_only": {"enum": ["unrestricted", "required", "review"]}
+      }
+    },
+    "duplicate_check": {"$ref": "#/$defs/integer_constraint"},
+    "prompt_injection_defense": {"const": true}
+  },
+  "$defs": {
+    "money_constraint": {
+      "type": "object", "additionalProperties": false, "required": ["state", "max_chf"],
+      "properties": {"state": {"enum": ["unrestricted", "required"]}, "max_chf": {"type": ["number", "null"], "minimum": 0}}
+    },
+    "rolling_money_constraint": {
+      "type": "object", "additionalProperties": false, "required": ["state", "max_chf", "days"],
+      "properties": {"state": {"enum": ["unrestricted", "required"]}, "max_chf": {"type": ["number", "null"], "minimum": 0}, "days": {"type": ["integer", "null"], "minimum": 1}}
+    },
+    "integer_constraint": {
+      "type": "object", "additionalProperties": false, "required": ["state", "value"],
+      "properties": {"state": {"enum": ["unrestricted", "required"]}, "value": {"type": ["integer", "null"], "minimum": 0}}
+    },
+    "category_constraint": {
+      "type": "object", "additionalProperties": false, "required": ["state", "values"],
+      "properties": {"state": {"enum": ["unrestricted", "required"]}, "values": {"type": "array", "items": {"type": "string"}}}
+    },
+    "merchant_category_constraint": {
+      "type": "object", "additionalProperties": false, "required": ["state", "values"],
+      "properties": {
+        "state": {"enum": ["unrestricted", "required"]},
+        "values": {
+          "type": "array",
+          "items": {"enum": ["books", "cash_withdrawal", "clothing", "dining", "electronics", "entertainment", "food_delivery", "fuel", "groceries", "health", "home_improvement", "hotel", "household", "kids_family", "pet_care", "photography", "software", "sporting_goods", "subscriptions", "sustainable_goods", "transport", "travel"]}
+        }
+      }
+    },
+    "string_set_constraint": {
+      "type": "object", "additionalProperties": false, "required": ["state", "values"],
+      "properties": {"state": {"enum": ["unrestricted", "required"]}, "values": {"type": "array", "items": {"type": "string"}}}
+    },
+    "item_matcher": {
+      "type": "object", "additionalProperties": false,
+      "required": ["match_mode", "item_id", "name_contains", "category", "attributes"],
+      "properties": {
+        "match_mode": {"enum": ["exact_item_id", "name_and_category", "category_only"]},
+        "item_id": {"type": ["string", "null"]},
+        "name_contains": {"type": ["string", "null"]},
+        "category": {"type": ["string", "null"]},
+        "attributes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "value"],
+            "properties": {
+              "name": {"type": "string"},
+              "value": {"type": "string"}
+            }
+          }
+        }
+      }
+    }
+  }
+}
