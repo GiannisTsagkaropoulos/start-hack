@@ -133,6 +133,27 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+def identify() -> dict[str, str]:
+    """Confirm which backend/contract is actually running on this port.
+
+    A separate, incompatible backend (Jafar's makedoniaz/VisecaControlLayer,
+    which validates a completely different LocalMandateV2 mandate shape) can
+    also be run locally on the same default port. Pointing this frontend at
+    that backend instead of this one produces a generic, misleading
+    "mandate has missing or unexpected fields" error that looks like a
+    frontend bug but isn't - the two backends are simply not the same
+    contract. Before debugging a confirm/decision failure, curl this route
+    and confirm `contract` below, rather than assuming the request body is
+    wrong.
+    """
+    return {
+        "service": "wallet-control-layer",
+        "branch": "integration/canonical-vertical-slice",
+        "contract": "flat-schema-v1",
+    }
+
+
 def parse_with_llm(text: str) -> DraftSchema:
     
     client = openai.OpenAI(
