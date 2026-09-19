@@ -275,11 +275,6 @@ export default function WalletPage() {
                   required
                 />
               </div>
-              <p className="text-xs text-slate-400">
-                We'll turn this into specific, checkable rules on the next
-                screen — you'll see exactly what we understood before anything
-                is granted.
-              </p>
               {error && <ErrorMessage message={error} />}
               <div className="flex justify-between">
                 <button
