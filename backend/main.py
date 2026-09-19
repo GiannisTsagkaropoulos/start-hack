@@ -6,6 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import openai
 
+import decision_engine
+from decision_engine import DecisionResponse
+
 Currency = Literal["CHF", "USD", "EUR"]
 
 
@@ -112,6 +115,11 @@ class ConfirmationResponse(BaseModel):
     success: bool
     message: str
     walletId: int
+
+
+class DecisionRequest(BaseModel):
+    wallet_id: int = Field(ge=0, le=31)
+    policy: Schema
 
 
 app = FastAPI(title="Wallet Control Layer")
@@ -268,3 +276,8 @@ def confirm_policy(request: ConfirmationRequest) -> ConfirmationResponse:
         message="Wallet policy validated and saved.",
         walletId=request.wallet_id,
     )
+
+
+@app.post("/decision", response_model=DecisionResponse)
+def decide(request: DecisionRequest) -> DecisionResponse:
+    return decision_engine.evaluate_purchase(request.policy)

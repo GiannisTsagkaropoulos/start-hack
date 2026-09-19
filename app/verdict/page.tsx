@@ -1,26 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft, CheckCircle2, HelpCircle, ShieldAlert } from "lucide-react";
+import { VERDICT_STORAGE_KEY } from "@/lib/viseca-control-layer";
 import type { DecisionEvidence, DecisionResponse } from "@/lib/viseca-control-layer";
-
-const EXAMPLE_VERDICT: DecisionResponse = {
-  authorization_id: "AU_EXAMPLE_0001",
-  decision: "step_up",
-  reason_codes: ["soft_rule_unknown"],
-  evidence: [{
-    rule_type: "soft",
-    field: "history.approved_merchant_transaction_count",
-    operator: ">=",
-    expected: 1,
-    actual: null,
-    status: "unknown",
-    source: "authorization_history",
-    message: "No reliable value is available for merchant purchase history.",
-  }],
-  engine_version: "rule-classifier-v2",
-};
 
 const decisionStyle = {
   approve: { label: "Approved", tone: "bg-emerald-50 text-emerald-700 border-emerald-200", Icon: CheckCircle2 },
@@ -29,9 +13,37 @@ const decisionStyle = {
 };
 
 export default function VerdictPage() {
-  const [verdict] = useState<DecisionResponse>(EXAMPLE_VERDICT);
+  const [verdict, setVerdict] = useState<DecisionResponse | null | undefined>(undefined);
   const [softCheckDecisions, setSoftCheckDecisions] = useState<Record<string, "accepted" | "rejected">>({});
   const [transactionApproved, setTransactionApproved] = useState(false);
+
+  useEffect(() => {
+    // sessionStorage is unavailable during server rendering, so the initial
+    // read has to happen in an effect rather than a useState initializer.
+    const stored = sessionStorage.getItem(VERDICT_STORAGE_KEY);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setVerdict(stored ? (JSON.parse(stored) as DecisionResponse) : null);
+  }, []);
+
+  if (verdict === undefined) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#f7f9f7] text-slate-500">
+        Loading verdict…
+      </main>
+    );
+  }
+
+  if (verdict === null) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#f7f9f7] px-5 text-center text-slate-600">
+        <p>No verdict yet. Confirm a wallet policy first to get a classification.</p>
+        <Link href="/wallet" className="inline-flex items-center gap-2 font-semibold text-emerald-700 hover:text-emerald-800">
+          <ArrowLeft size={17} /> Go to wallet policy
+        </Link>
+      </main>
+    );
+  }
+
   const presentation = decisionStyle[verdict.decision];
   const Icon = presentation.Icon;
   const softCheckProblems = verdict.evidence.filter(

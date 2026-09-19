@@ -15,8 +15,38 @@ import {
 import {
   ParsePolicyResponse,
   ParsedPolicyDraft,
-  toLocalMandateV2,
+  VERDICT_STORAGE_KEY,
+  WalletPolicy,
 } from "@/lib/viseca-control-layer";
+
+function toWalletPolicy(draft: ParsedPolicyDraft): WalletPolicy {
+  return {
+    raw_instructions: draft.raw_instructions,
+    spending: {
+      per_item_purchase_price_max: draft.spending.per_item_purchase_price_max as number,
+      per_period_purchase_price_max: draft.spending.per_period_purchase_price_max,
+      currency: draft.spending.currency as WalletPolicy["spending"]["currency"],
+      period_in_days: draft.spending.period_in_days,
+    },
+    merchant: {
+      familiarity_required: draft.merchant.familiarity_required,
+      familiarity_min_prior_approved: draft.merchant.familiarity_min_prior_approved ?? 0,
+      blocklist: draft.merchant.blocklist ?? [],
+      allowlist: draft.merchant.allowlist ?? [],
+    },
+    order_terms: {
+      require_returnable: draft.order_terms.require_returnable,
+      require_cancellable: draft.order_terms.require_cancellable,
+    },
+    session: {
+      max_recent_attempts_10m: draft.session.max_recent_attempts_10m,
+      trusted_devices_only: draft.session.trusted_devices_only as boolean,
+      domestic_only: draft.session.domestic_only,
+    },
+    duplicate_check: { block_repeats_within_minutes: null },
+    notes_for_customer: draft.notes_for_customer ?? "",
+  };
+}
 
 type Step = "select" | "describe" | "review";
 
@@ -148,20 +178,38 @@ export default function WalletPage() {
     setError("");
 
     try {
-      const res = await fetch(`${API_URL}/confirm-policy`, {
+      const policy = toWalletPolicy(draftPolicy);
+
+      const confirmRes = await fetch(`${API_URL}/confirm-policy`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           wallet_id: Number(walletId),
-          policy: toLocalMandateV2(draftPolicy, policyText),
+          policy,
         }),
       });
 
-      if (!res.ok) {
-        const errData = await res.json();
+      if (!confirmRes.ok) {
+        const errData = await confirmRes.json();
         throw new Error(errData.detail?.[0]?.msg || "Validation failed.");
       }
 
+      const decisionRes = await fetch(`${API_URL}/decision`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          wallet_id: Number(walletId),
+          policy,
+        }),
+      });
+
+      if (!decisionRes.ok) {
+        const errData = await decisionRes.json();
+        throw new Error(errData.detail?.[0]?.msg || "Could not classify a purchase against this policy.");
+      }
+
+      const verdict = await decisionRes.json();
+      sessionStorage.setItem(VERDICT_STORAGE_KEY, JSON.stringify(verdict));
       router.push("/verdict");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Confirmation failed.");

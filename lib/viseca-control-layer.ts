@@ -144,6 +144,44 @@ export interface ConfirmPolicyResponse {
   reasoning: string[] | null;
 }
 
+/** Exact `ConfirmationRequest.policy` / `DecisionRequest.policy` shape the local backend accepts. */
+export interface WalletPolicy {
+  raw_instructions: string;
+  spending: {
+    per_item_purchase_price_max: number;
+    per_period_purchase_price_max: number | null;
+    currency: Currency;
+    period_in_days: number | null;
+  };
+  merchant: {
+    familiarity_required: boolean | null;
+    familiarity_min_prior_approved: number;
+    blocklist: string[];
+    allowlist: string[];
+  };
+  order_terms: {
+    require_returnable: boolean | null;
+    require_cancellable: boolean | null;
+  };
+  session: {
+    max_recent_attempts_10m: number | null;
+    trusted_devices_only: boolean;
+    domestic_only: boolean | null;
+  };
+  duplicate_check: {
+    block_repeats_within_minutes: number | null;
+  };
+  notes_for_customer: string;
+}
+
+export interface DecisionRequest {
+  wallet_id: number;
+  policy: WalletPolicy;
+}
+
+/** sessionStorage key the wallet page uses to hand its fetched verdict to /verdict. */
+export const VERDICT_STORAGE_KEY = "wallet-verdict";
+
 export interface DecisionEvidence {
   rule_type: "hard" | "soft";
   field: string;
