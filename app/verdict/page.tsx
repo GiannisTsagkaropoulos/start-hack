@@ -258,8 +258,8 @@ function TransactionMoment({
           <motion.div initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }} transition={{ duration: 0.25 }} className="overflow-hidden">
             <div className="space-y-3 px-4 pb-4 pl-7">
               {untrusted && (
-                <p className="rounded-lg border border-dashed border-white/10 bg-white/[0.02] px-3 py-2 text-[12px] italic leading-5 text-ink-3">
-                  <span className="mr-1.5 rounded bg-white/5 px-1.5 py-0.5 text-[9px] font-bold not-italic uppercase tracking-wide text-ink-3">
+                <p className="rounded-lg border border-dashed border-white/15 bg-white/[0.04] px-3 py-2 text-[12px] italic leading-5 text-ink-1">
+                  <span className="mr-1.5 rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-bold not-italic uppercase tracking-wide text-ink-2">
                     Evidence, not authority
                   </span>
                   {untrusted}
