@@ -169,7 +169,9 @@ export default function WalletPage() {
       setDraftPolicy(data.policy);
       setFragments(extractLanguageFragments(data.policy.raw_instructions, data.policy));
       setStep("decomposing");
-      if (!reduceMotion) setTimeout(() => setStep("review"), 1100);
+      // Hold the decomposed sentence long enough to actually read which words
+      // became authority before the structured view takes over.
+      if (!reduceMotion) setTimeout(() => setStep("review"), 2200);
       else setStep("review");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error parsing policy.");
@@ -428,7 +430,14 @@ function DecomposingStep({ raw, fragments }: { raw: string; fragments: LanguageF
   fragments.forEach((f, i) => {
     if (f.start > cursor) parts.push(<span key={`t-${i}`}>{raw.slice(cursor, f.start)}</span>);
     parts.push(
-      <motion.span key={f.id} layoutId={`frag-${f.id}`} className="rounded-md bg-authority-dim px-1 text-authority-strong" transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}>
+      <motion.span
+        key={f.id}
+        layoutId={`frag-${f.id}`}
+        initial={{ backgroundColor: "rgba(61,220,151,0)", color: "var(--ink-1)" }}
+        animate={{ backgroundColor: "rgba(61,220,151,0.16)", color: "var(--authority-strong)" }}
+        transition={{ delay: 0.35 + i * 0.28, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+        className="rounded-md px-1"
+      >
         {f.text}
       </motion.span>,
     );
@@ -437,6 +446,7 @@ function DecomposingStep({ raw, fragments }: { raw: string; fragments: LanguageF
   if (cursor < raw.length) parts.push(<span key="t-last">{raw.slice(cursor)}</span>);
   return (
     <motion.div initial={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }} className="pt-6">
+      <p className="mb-5 text-xs font-semibold uppercase tracking-[0.22em] text-authority">Reading your words</p>
       <p className="text-2xl leading-relaxed text-ink-1 sm:text-3xl">{parts}</p>
     </motion.div>
   );
