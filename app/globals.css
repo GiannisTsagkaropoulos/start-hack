@@ -1,65 +1,69 @@
 @import "tailwindcss";
 
 :root {
-  --surface-0: #f6f7f5;
-  --surface-1: #ffffff;
-  --surface-2: #f0f1ee;
-  --surface-sunken: #eceeea;
-  --border-subtle: #e4e6e1;
-  --border-strong: #d3d6cf;
-  --ink-1: #14161b;
-  --ink-2: #4a4f47;
-  --ink-3: #82877e;
-  --authority: #0f6b4c;
-  --authority-strong: #0a5038;
-  --authority-tint: #e8f3ec;
-  --authority-tint-border: #bfe0cd;
-  --decline: #b3261e;
-  --decline-tint: #fbeceb;
-  --decline-tint-border: #eec4c0;
-  --review: #9a6700;
-  --review-tint: #fdf3e0;
-  --review-tint-border: #f0dcaa;
-  --evidence: #55606c;
-  --focus-ring: #0f6b4c;
+  /* Deep spatial environment - the product is dark by default now, not a
+     light SaaS surface with a dark mode bolted on. */
+  --void: #05060a;
+  --surface-1: #0b0d12;
+  --surface-2: #12151b;
+  --surface-glass: rgba(18, 21, 27, 0.55);
+  --border-hairline: rgba(255, 255, 255, 0.08);
+  --border-hairline-strong: rgba(255, 255, 255, 0.16);
+  --ink-0: #f5f7f4;
+  --ink-1: #d7dbd3;
+  --ink-2: #9aa39a;
+  --ink-3: #656e64;
+
+  /* Semantic authority palette - luminous against the void, not pastel. */
+  --authority: #3ddc97;
+  --authority-strong: #6bf0b4;
+  --authority-dim: rgba(61, 220, 151, 0.16);
+  --authority-line: rgba(61, 220, 151, 0.45);
+  --decline: #ff6b5e;
+  --decline-dim: rgba(255, 107, 94, 0.14);
+  --decline-line: rgba(255, 107, 94, 0.45);
+  --review: #f3b64f;
+  --review-dim: rgba(243, 182, 79, 0.14);
+  --review-line: rgba(243, 182, 79, 0.5);
+  --evidence: #8891a6;
+
   --font-display: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-authority: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-seal: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @theme inline {
-  --color-surface-0: var(--surface-0);
+  --color-void: var(--void);
   --color-surface-1: var(--surface-1);
   --color-surface-2: var(--surface-2);
-  --color-surface-sunken: var(--surface-sunken);
-  --color-border-subtle: var(--border-subtle);
-  --color-border-strong: var(--border-strong);
+  --color-ink-0: var(--ink-0);
   --color-ink-1: var(--ink-1);
   --color-ink-2: var(--ink-2);
   --color-ink-3: var(--ink-3);
   --color-authority: var(--authority);
   --color-authority-strong: var(--authority-strong);
-  --color-authority-tint: var(--authority-tint);
+  --color-authority-dim: var(--authority-dim);
   --color-decline: var(--decline);
-  --color-decline-tint: var(--decline-tint);
+  --color-decline-dim: var(--decline-dim);
   --color-review: var(--review);
-  --color-review-tint: var(--review-tint);
+  --color-review-dim: var(--review-dim);
+  --color-evidence: var(--evidence);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 * {
-  border-color: var(--border-subtle);
+  border-color: var(--border-hairline);
 }
 
 html {
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 body {
-  background: var(--surface-0);
-  color: var(--ink-1);
+  background: var(--void);
+  color: var(--ink-0);
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
@@ -67,15 +71,42 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-::selection {
-  background: var(--authority);
-  color: white;
+.font-mono {
+  font-family: var(--font-mono);
 }
 
-/* Respect the OS/browser preference site-wide: any element that opted into
-   motion falls back to an instant, still-meaningful state transition. This
-   is enforced again per-component via useReducedMotion(), but the CSS rule
-   is the last line of defense for anything animated purely in CSS. */
+::selection {
+  background: var(--authority);
+  color: #04140d;
+}
+
+/* The living border-light technique (adapted from the general offset-path
+   + mask-composite pattern used by ibelick/motion-primitives' BorderTrail,
+   MIT licensed): a small bright point travels the exact rounded rectangle
+   of its parent, masked so only the 1px ring itself is visible. */
+.living-edge {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(#000, #000), linear-gradient(#000, #000);
+  mask-image: linear-gradient(#000, #000), linear-gradient(#000, #000);
+  -webkit-mask-clip: padding-box, border-box;
+  mask-clip: padding-box, border-box;
+  -webkit-mask-composite: source-out;
+  mask-composite: exclude;
+  border: 1px solid transparent;
+  overflow: hidden;
+}
+
+.living-edge__dot {
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  aspect-ratio: 1;
+  offset-path: rect(0 auto auto 0 round 24px);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.001ms !important;
