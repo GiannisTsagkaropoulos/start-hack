@@ -60,7 +60,7 @@ export function AuthorityPanel({
       }`}
     >
       <div>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-300 mb-4">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-400 mb-4">
           Your authority — wallet {walletId}
         </p>
         {max ? (

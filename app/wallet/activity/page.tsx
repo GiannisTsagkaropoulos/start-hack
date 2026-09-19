@@ -93,12 +93,34 @@ export default function ActivityPage() {
   const ruleMax = policy.spending?.per_item_purchase_price_max ?? 120.0;
   const overLimit = purchase.billing_amount_chf > ruleMax;
 
+  const meta = {
+    approve: { label: "Approved", verb: "is within", Icon: Check, color: "text-emerald-700", accent: "bg-emerald-500", bg: "bg-emerald-50" },
+    decline: { label: "Declined", verb: "exceeds", Icon: X, color: "text-red-700", accent: "bg-red-500", bg: "bg-red-50" },
+    step_up: { label: "Asking you directly", verb: "depends on a fact that's", Icon: HelpCircle, color: "text-amber-700", accent: "bg-amber-500", bg: "bg-amber-50" },
+  }[result.decision];
+  const Icon = meta.Icon;
+  const causeSentence =
+    result.decision === "step_up"
+      ? "The return policy for this item is genuinely unstated."
+      : `CHF ${purchase.billing_amount_chf.toFixed(2)} ${meta.verb} your CHF ${ruleMax.toFixed(2)} per-item limit.`;
+
   return (
-    <div className="min-h-screen bg-[#f7f9f7] text-slate-900 lg:flex lg:items-center">
+    <main className="min-h-screen bg-[#f7f9f7] text-slate-900 lg:flex lg:items-center">
+      <h1 className="sr-only">Purchase attempts against wallet {walletId ?? "7"}&apos;s confirmed authority</h1>
+      {/* Compact sticky summary bar — mobile only. On small screens the full
+          AuthorityPanel would consume the entire first viewport; this keeps
+          authority visible without that cost. */}
+      <div className="lg:hidden sticky top-0 z-10 flex items-center justify-between gap-3 bg-ink-900 px-5 py-3 text-white">
+        <span className="text-sm font-bold">Leash</span>
+        <span className="text-xs font-semibold text-emerald-400">
+          CHF {ruleMax.toFixed(2)} <span className="text-slate-400 font-normal">max/item</span>
+        </span>
+      </div>
+
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-5 py-6 sm:px-8 lg:flex-row lg:items-start">
-        {/* Left rail — sized to its content, sticky, never artificially stretched
-            to fill the viewport just because that's what a sidebar "should" do. */}
-        <div className="lg:sticky lg:top-6 lg:w-[260px] lg:shrink-0">
+        {/* Left rail — desktop only; the mobile sticky bar above replaces it there
+            so authority never becomes just another same-width stacked card. */}
+        <div className="hidden lg:block lg:sticky lg:top-6 lg:w-[260px] lg:shrink-0">
           <Link href="/" className="mb-4 inline-block text-base font-bold text-slate-800">
             Leash
           </Link>
@@ -106,20 +128,20 @@ export default function ActivityPage() {
             walletId={walletId ?? "7"}
             policy={policy}
             footer={
-              <p className="text-[11px] text-slate-500 leading-relaxed">
+              <p className="text-[11px] text-slate-300 leading-relaxed">
                 Only a decision ever crosses back to this side.
               </p>
             }
           />
         </div>
 
-        {/* Right — one unified decision surface, not four separate boxes */}
+        {/* Right — one unified decision surface, verdict-first */}
         <div className="flex-1 min-w-0">
           <div className="mb-4 flex items-center justify-between gap-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
               Purchase attempts
             </p>
-            <span className="shrink-0 rounded-full border border-slate-300 px-2 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wide text-slate-400">
+            <span className="shrink-0 rounded-full border border-slate-300 px-2 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wide text-slate-500">
               Fixture data
             </span>
           </div>
@@ -130,7 +152,7 @@ export default function ActivityPage() {
                 key={s.id}
                 onClick={() => setActiveId(s.id)}
                 className={`shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 font-medium transition-colors ${
-                  activeId === s.id ? "bg-white shadow-sm text-slate-900" : "text-slate-500 hover:text-slate-700"
+                  activeId === s.id ? "bg-white shadow-sm text-slate-900" : "text-slate-600 hover:text-slate-800"
                 }`}
               >
                 {s.name}
@@ -138,65 +160,63 @@ export default function ActivityPage() {
             ))}
           </div>
 
+          {/* The spine: one continuous, aligned column running from the purchase
+              fact straight through to the verdict. Merchant text is NOT on this
+              spine — it's an offset lane that visibly terminates, encountered
+              only after you already know the outcome, never read as an input
+              to it. */}
           <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-            {/* Purchase header */}
-            <div className="flex items-baseline justify-between px-5 pt-4 pb-3 border-b border-slate-100">
-              <span className="text-xl font-bold tabular-nums">CHF {purchase.billing_amount_chf.toFixed(2)}</span>
-              <span className="text-sm text-slate-500">{purchase.merchant_name}</span>
-            </div>
-
-            {/* Merchant text — the untrusted-data boundary sequence */}
-            <div className="px-5 py-3 border-b border-slate-100">
-              <div
-                className={`rounded-lg border border-dashed px-3 py-2 transition-all duration-300 ${
-                  phase === "entering"
-                    ? "border-slate-300 bg-slate-50 translate-x-0 opacity-100"
-                    : phase === "checking"
-                      ? "border-amber-300 bg-amber-50/60"
-                      : "border-slate-200 bg-slate-50/60 opacity-70"
-                }`}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">
-                    merchant text — not authority
-                  </p>
-                  {phase !== "resolved" && (
-                    <Lock size={11} className={phase === "checking" ? "text-amber-500" : "text-slate-300"} />
-                  )}
+            <div
+              className={`px-5 pt-5 pb-4 transition-opacity duration-300 ${meta.bg} ${
+                phase === "entering" ? "opacity-40" : "opacity-100"
+              }`}
+            >
+              <div className="flex items-start gap-3">
+                <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${meta.accent}`}>
+                  <Icon className="text-white" size={18} />
                 </div>
-                <p className="text-xs text-slate-500 italic leading-relaxed">"{purchase.item_text}"</p>
+                <div>
+                  <p className={`text-2xl font-extrabold leading-tight ${meta.color}`}>{meta.label}</p>
+                  <p className="text-sm text-slate-600 mt-0.5">{causeSentence}</p>
+                </div>
               </div>
             </div>
 
-            {/* Comparison — the numbers doing the arguing, not adjectives */}
-            <div
-              className={`flex items-center justify-center gap-4 px-5 py-4 border-b border-slate-100 transition-opacity duration-300 ${
-                phase === "entering" ? "opacity-0" : "opacity-100"
-              }`}
-            >
-              <div className="text-center">
-                <p className="text-[9px] uppercase tracking-wide text-slate-400 mb-0.5">attempted</p>
+            <div className="flex items-center justify-between px-5 py-3 border-t border-slate-100 bg-slate-50/60">
+              <div>
+                <p className="text-[10px] uppercase tracking-wide text-slate-500">{purchase.merchant_name}</p>
                 <p className={`text-lg font-bold tabular-nums ${overLimit ? "text-red-600" : "text-slate-800"}`}>
                   CHF {purchase.billing_amount_chf.toFixed(2)}
                 </p>
               </div>
-              <span className="text-slate-300 text-sm font-mono">
+              <span className="text-slate-400 text-sm font-mono">
                 {result.decision === "step_up" ? "?" : overLimit ? ">" : "≤"}
               </span>
-              <div className="text-center">
-                <p className="text-[9px] uppercase tracking-wide text-slate-400 mb-0.5">your limit</p>
+              <div className="text-right">
+                <p className="text-[10px] uppercase tracking-wide text-slate-500">your limit</p>
                 <p className="text-lg font-bold tabular-nums text-slate-800">CHF {ruleMax.toFixed(2)}</p>
               </div>
             </div>
 
-            {/* Verdict — one shape, three colors, never three different layouts */}
-            <VerdictBanner result={result} visible={phase === "resolved"} />
+            {/* Offset lane — collapsed by default, encountered after the verdict,
+                framed as a record of what was said rather than evidence you
+                weigh before deciding. */}
+            <details className="group border-t border-slate-100">
+              <summary className="cursor-pointer list-none flex items-center gap-2 px-5 py-2.5 text-xs font-medium text-slate-500 hover:text-slate-700">
+                <Lock size={11} className="text-slate-400" />
+                What the merchant sent (had no vote in this)
+                <span className="ml-auto group-open:rotate-90 transition-transform">›</span>
+              </summary>
+              <p className="px-5 pb-3 text-xs text-slate-500 italic leading-relaxed border-l-2 border-slate-200 ml-5 mr-5">
+                "{purchase.item_text}"
+              </p>
+            </details>
 
-            <details className="group px-5 py-3 bg-slate-50/50">
-              <summary className="cursor-pointer text-[11px] font-semibold text-slate-400 hover:text-slate-600 list-none flex items-center gap-1">
+            <details className="group border-t border-slate-100 bg-slate-50/50">
+              <summary className="cursor-pointer text-[11px] font-semibold text-slate-500 hover:text-slate-700 list-none flex items-center gap-1 px-5 py-2.5">
                 Evidence <span className="group-open:rotate-90 transition-transform">›</span>
               </summary>
-              <div className="mt-2 space-y-1 font-mono text-[10px] text-slate-400">
+              <div className="px-5 pb-3 space-y-1 font-mono text-[10px] text-slate-500">
                 <div>{purchase.authorization_id} · engine {result.engine_version}</div>
                 {result.evidence.map((e, i) => (
                   <div key={i}>{e.field} {e.operator} {e.expected} — was {e.actual ?? "unknown"} ({e.status})</div>
@@ -206,30 +226,7 @@ export default function ActivityPage() {
           </div>
         </div>
       </div>
-    </div>
+    </main>
   );
 }
 
-function VerdictBanner({ result, visible }: { result: DecisionResult; visible: boolean }) {
-  const meta = {
-    approve: { icon: Check, label: "Approved", sub: "Inside every rule you set.", color: "text-emerald-700", bar: "bg-emerald-500", bg: "bg-emerald-50" },
-    decline: { icon: X, label: "Declined", sub: "Outside the authority you confirmed.", color: "text-red-700", bar: "bg-red-500", bg: "bg-red-50" },
-    step_up: { icon: HelpCircle, label: "Asking you directly", sub: "A fact this rule depends on is unknown.", color: "text-amber-700", bar: "bg-amber-500", bg: "bg-amber-50" },
-  }[result.decision];
-  const Icon = meta.icon;
-
-  return (
-    <div
-      className={`flex items-center gap-3 px-5 py-3.5 transition-opacity duration-300 ${meta.bg} ${
-        visible ? "opacity-100" : "opacity-0"
-      }`}
-    >
-      <div className={`h-full w-1 self-stretch rounded-full ${meta.bar} shrink-0`} style={{ minHeight: "2rem" }} />
-      <Icon className={meta.color} size={18} />
-      <div>
-        <p className={`text-sm font-bold ${meta.color}`}>{meta.label}</p>
-        <p className="text-xs text-slate-500">{meta.sub}</p>
-      </div>
-    </div>
-  );
-}
