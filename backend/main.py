@@ -10,6 +10,11 @@ from dotenv import load_dotenv
 import decision_engine
 from decision_engine import DecisionResponse
 from leash_client import LeashApiError
+from policy_prompt import (
+    build_policy_extraction_messages,
+    detect_explicit_currency,
+    detect_explicit_period_days,
+)
 from scenario_jobs import confirm_and_start_job, get_job, prepare_job, resolve_authorization
 
 
@@ -171,69 +176,27 @@ def identify() -> dict[str, str]:
 
 
 def parse_with_llm(text: str) -> DraftSchema:
-    
     client = openai.OpenAI(
         base_url="http://localhost:11434/v1",
         api_key="ollama",  # Ollama requires a string here, but ignores the value
     )
-    
-    prompt = f"""
-    You are an AI assistant configuring a secure wallet policy for an AI shopping agent.
-    Extract the rules, limits, and preferences from the user's natural language input.
-    If a spending value is not mentioned or cannot be confidently inferred,
-    output null for it so the customer must provide it. If returnability or
-    cancellability is not mentioned, default it to true.
-
-    User Input: "{text}"
-
-    Product category is the primary authorization rule. Derive one or more
-    allowed product categories from the requested product in the user's text.
-    Use only these exact values:
-    books, clothing, cosmetics, dining, electronics, food_delivery, fuel,
-    gift_card, groceries, home_improvement, hotel, household, membership,
-    sporting_goods, subscriptions, transport.
-
-    Examples: running shoes -> sporting_goods; groceries or food ingredients
-    -> groceries; restaurant meal -> dining; delivered prepared meal ->
-    food_delivery. Do not use a merchant category as a substitute for the
-    requested product category. If no product can be identified, output null
-    for products.allowed_categories so the customer must choose it.
-
-    Output in JSON format a FinalSchema:
-
-    class Products(BaseModel):
-    allowed_categories: list[ProductCategory]
-
-    class Spending(BaseModel):
-    per_item_purchase_price_max: float = Field(gt=0)
-    per_period_purchase_price_max: float = Field(gt=0)
-    currency: Currency
-    period_in_days: int = Field(gt=0)
-
-class Merchant(BaseModel):
-    blocklist: list[str] = Field(default_factory=list)
-    allowlist: list[str] = Field(default_factory=list)
-
-class OrderTerms(BaseModel):
-    require_returnable: bool = True
-    require_cancellable: bool = True
-
-class FinalSchema(BaseModel):
-    raw_instructions: str = Field(min_length=1)
-    products: Products
-    spending: Spending
-    merchant: Merchant
-    order_terms: OrderTerms
-    notes_for_customer: str = ""
-    """
-    
 
     completion = client.beta.chat.completions.parse(
         model="llama3.2",  # Ensure this matches the model you pulled in Ollama
-        messages=[{"role": "user", "content": prompt}],
+        messages=build_policy_extraction_messages(text),
         response_format=DraftSchema,
+        temperature=0,
     )
-    return completion.choices[0].message.parsed
+    parsed = completion.choices[0].message.parsed
+    if parsed is None:
+        raise ValueError("The local model did not return a parsed wallet policy.")
+
+    # Currency is cheap and safer to verify deterministically. This guarantees
+    # that an omitted currency stays null and common spellings such as
+    # "francs" and "franks" become CHF even if the model guesses otherwise.
+    parsed.spending.currency = detect_explicit_currency(text)
+    parsed.spending.period_in_days = detect_explicit_period_days(text)
+    return parsed
 
 
 def check_missing_fields(draft: dict[str, Any]) -> list[str]:
