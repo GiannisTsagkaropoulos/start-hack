@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useState } from "react";
-import { AlertCircle, ArrowLeft, CheckCircle2, HelpCircle, ShieldAlert } from "lucide-react";
-import type { DecisionResponse } from "@/lib/viseca-control-layer";
+import { useState } from "react";
+import { ArrowLeft, CheckCircle2, HelpCircle, ShieldAlert } from "lucide-react";
+import type { DecisionEvidence, DecisionResponse } from "@/lib/viseca-control-layer";
 
 const EXAMPLE_VERDICT: DecisionResponse = {
   authorization_id: "AU_EXAMPLE_0001",
@@ -29,24 +29,28 @@ const decisionStyle = {
 };
 
 export default function VerdictPage() {
-  const [verdict, setVerdict] = useState<DecisionResponse>(EXAMPLE_VERDICT);
-  const [input, setInput] = useState(JSON.stringify(EXAMPLE_VERDICT, null, 2));
-  const [error, setError] = useState("");
+  const [verdict] = useState<DecisionResponse>(EXAMPLE_VERDICT);
+  const [softCheckDecisions, setSoftCheckDecisions] = useState<Record<string, "accepted" | "rejected">>({});
+  const [transactionApproved, setTransactionApproved] = useState(false);
   const presentation = decisionStyle[verdict.decision];
   const Icon = presentation.Icon;
+  const softCheckProblems = verdict.evidence.filter(
+    (item) => item.rule_type === "soft" && item.status !== "pass",
+  );
+  const allSoftChecksAccepted = softCheckProblems.every(
+    (item, index) => softCheckDecisions[softCheckId(item, index)] === "accepted",
+  );
+  const hasRejectedSoftCheck = softCheckProblems.some(
+    (item, index) => softCheckDecisions[softCheckId(item, index)] === "rejected",
+  );
 
-  function loadVerdict(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    try {
-      const parsed = JSON.parse(input) as DecisionResponse;
-      if (!parsed.authorization_id || !["approve", "decline", "step_up"].includes(parsed.decision) || !Array.isArray(parsed.evidence)) {
-        throw new Error("This is not a DecisionResponse object.");
-      }
-      setVerdict(parsed);
-      setError("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not read the decision JSON.");
-    }
+  function setSoftCheckDecision(id: string, decision: "accepted" | "rejected") {
+    setSoftCheckDecisions((current) => ({ ...current, [id]: decision }));
+    setTransactionApproved(false);
+  }
+
+  function proceedWithTransaction() {
+    if (allSoftChecksAccepted) setTransactionApproved(true);
   }
 
   return (
@@ -67,40 +71,130 @@ export default function VerdictPage() {
         </header>
 
         <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="font-bold">Reason codes</h2>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {verdict.reason_codes.length ? verdict.reason_codes.map((code) => <span key={code} className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">{code}</span>) : <span className="text-sm text-slate-500">All evaluated rules passed.</span>}
+          <h2 className="font-bold">Soft-check review</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            These checks did not pass automatically. Review each explanation and choose whether to accept the exception or reject the transaction.
+          </p>
+          <div className="mt-4 space-y-4">
+            {softCheckProblems.length ? softCheckProblems.map((item, index) => {
+              const id = softCheckId(item, index);
+              const decision = softCheckDecisions[id];
+              return (
+                <article key={id} className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+                  <p className="text-sm font-bold text-amber-950">{softCheckTitle(item)}</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-700">{item.message}</p>
+                  <details className="mt-3 rounded-xl border border-amber-200 bg-white/70 px-3 py-2 text-sm text-slate-700">
+                    <summary className="cursor-pointer font-semibold text-amber-900">View check details</summary>
+                    <dl className="mt-3 grid gap-3 sm:grid-cols-3">
+                      <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">What we needed</dt><dd className="mt-1">{describeExpected(item)}</dd></div>
+                      <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">What we found</dt><dd className="mt-1">{item.actual === null ? "We could not verify this information." : formatEvidenceValue(item.actual)}</dd></div>
+                      <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Checked from</dt><dd className="mt-1">{friendlySource(item.source)}</dd></div>
+                    </dl>
+                  </details>
+                  <div className="mt-4 flex flex-wrap gap-3" role="radiogroup" aria-label={`Decision for ${item.field}`}>
+                    <ReviewChoice
+                      checked={decision === "accepted"}
+                      label="Accept exception"
+                      description="Continue despite this soft-check result."
+                      onChange={() => setSoftCheckDecision(id, "accepted")}
+                      tone="emerald"
+                    />
+                    <ReviewChoice
+                      checked={decision === "rejected"}
+                      label="Reject transaction"
+                      description="Do not allow this transaction to continue."
+                      onChange={() => setSoftCheckDecision(id, "rejected")}
+                      tone="red"
+                    />
+                  </div>
+                </article>
+              );
+            }) : (
+              <p className="rounded-2xl bg-emerald-50 p-4 text-sm text-emerald-800">There are no failed or unknown soft checks to review.</p>
+            )}
+          </div>
+
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={proceedWithTransaction}
+              disabled={!allSoftChecksAccepted || transactionApproved}
+              className="rounded-xl bg-emerald-600 px-4 py-2.5 font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {transactionApproved ? "Transaction approved" : "Proceed with transaction"}
+            </button>
+            {hasRejectedSoftCheck && <p className="text-sm font-medium text-red-700">This transaction is rejected because at least one soft-check concern was rejected.</p>}
+            {!allSoftChecksAccepted && !hasRejectedSoftCheck && <p className="text-sm text-slate-500">Accept every soft-check exception to proceed.</p>}
+            {transactionApproved && <p className="flex items-center gap-2 text-sm font-medium text-emerald-700"><CheckCircle2 size={17} /> All soft-check exceptions were accepted.</p>}
           </div>
         </section>
 
-        <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="font-bold">Decision evidence</h2>
-          <div className="mt-4 space-y-3">
-            {verdict.evidence.map((item, index) => (
-              <article key={`${item.field}-${index}`} className="rounded-2xl border border-slate-200 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <code className="text-sm font-semibold text-slate-800">{item.field}</code>
-                  <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${item.status === "pass" ? "bg-emerald-100 text-emerald-700" : item.status === "fail" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-800"}`}>{item.rule_type} · {item.status}</span>
-                </div>
-                <p className="mt-3 text-sm text-slate-600">{item.message}</p>
-                <dl className="mt-3 grid grid-cols-1 gap-2 text-xs text-slate-500 sm:grid-cols-3">
-                  <div><dt className="font-semibold">Expected</dt><dd>{String(item.operator)} {JSON.stringify(item.expected)}</dd></div>
-                  <div><dt className="font-semibold">Actual</dt><dd>{item.actual === null ? "Unknown" : JSON.stringify(item.actual)}</dd></div>
-                  <div><dt className="font-semibold">Source</dt><dd>{item.source}</dd></div>
-                </dl>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <form onSubmit={loadVerdict} className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <label className="block text-sm font-bold">Load an engine response</label>
-          <p className="mt-1 text-sm text-slate-500">Paste the exact DecisionResponse JSON returned by the classifier.</p>
-          <textarea value={input} onChange={(event) => setInput(event.target.value)} className="mt-4 min-h-56 w-full rounded-xl border border-slate-300 p-3 font-mono text-xs outline-none focus:border-emerald-500" />
-          {error && <p role="alert" className="mt-3 flex items-center gap-2 text-sm text-red-700"><AlertCircle size={16} /> {error}</p>}
-          <button type="submit" className="mt-4 rounded-xl bg-slate-900 px-4 py-2.5 font-semibold text-white hover:bg-slate-700">Display verdict</button>
-        </form>
       </div>
     </main>
+  );
+}
+
+function softCheckId(item: DecisionEvidence, index: number) {
+  return `${item.field}-${item.source}-${index}`;
+}
+
+function softCheckTitle(item: DecisionEvidence) {
+  if (item.field === "history.approved_merchant_transaction_count") {
+    return "Merchant history is unknown";
+  }
+  if (item.field.startsWith("history.")) return "Purchase history needs review";
+  if (item.field.startsWith("merchant.")) return "Merchant information needs review";
+  if (item.field.startsWith("session.")) return "Session details need review";
+  if (item.field.startsWith("risk.") || item.field.startsWith("fraud.")) return "Transaction risk needs review";
+  return "This transaction needs review";
+}
+
+function describeExpected(item: DecisionEvidence) {
+  if (item.field === "history.approved_merchant_transaction_count" && item.operator === ">=") {
+    return `At least ${formatEvidenceValue(item.expected)} previously approved purchase${item.expected === 1 ? "" : "s"} with this merchant.`;
+  }
+
+  const operator = { ">=": "At least", ">": "More than", "<=": "At most", "<": "Less than", "=": "Exactly", "!=": "Anything except" }[item.operator] ?? "Must be";
+  return `${operator} ${formatEvidenceValue(item.expected)}.`;
+}
+
+function formatEvidenceValue(value: unknown) {
+  if (Array.isArray(value)) return value.join(", ");
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return String(value);
+}
+
+function friendlySource(source: string) {
+  const names: Record<string, string> = {
+    authorization_history: "Your approved purchase history",
+    merchant_profile: "Merchant profile information",
+    session_context: "Your current session details",
+    risk_engine: "Transaction risk assessment",
+  };
+  return names[source] ?? source.replaceAll("_", " ");
+}
+
+function ReviewChoice({
+  checked,
+  label,
+  description,
+  onChange,
+  tone,
+}: {
+  checked: boolean;
+  label: string;
+  description: string;
+  onChange: () => void;
+  tone: "emerald" | "red";
+}) {
+  const colors = tone === "emerald"
+    ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+    : "border-red-300 bg-red-50 text-red-900";
+
+  return (
+    <label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 ${colors}`}>
+      <input type="radio" checked={checked} onChange={onChange} className="mt-1 h-4 w-4" />
+      <span><span className="block text-sm font-bold">{label}</span><span className="block text-xs opacity-80">{description}</span></span>
+    </label>
   );
 }

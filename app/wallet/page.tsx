@@ -2,6 +2,7 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   ArrowLeft,
@@ -20,6 +21,16 @@ import {
 type Step = "select" | "describe" | "review";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+const requiredConfirmationFields = [
+  "spending.per_item_purchase_price_max",
+  "spending.currency",
+  "merchant.familiarity_required",
+  "order_terms.require_returnable",
+  "order_terms.require_cancellable",
+  "session.trusted_devices_only",
+  "session.domestic_only",
+] as const;
 
 const DEFAULT_POLICY: ParsedPolicyDraft = {
   raw_instructions: "",
@@ -51,15 +62,14 @@ const DEFAULT_POLICY: ParsedPolicyDraft = {
 };
 
 export default function WalletPage() {
+  const router = useRouter();
   const [step, setStep] = useState<Step>("select");
   const [walletId, setWalletId] = useState("");
   const [policyText, setPolicyText] = useState("");
-  const [, setMissingFields] = useState<string[]>([]);
   const [draftPolicy, setDraftPolicy] = useState<ParsedPolicyDraft>(DEFAULT_POLICY);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [isConfirmed, setIsConfirmed] = useState(false);
 
   const progress = useMemo(
     () => ({ select: 1, describe: 2, review: 3 })[step],
@@ -82,8 +92,18 @@ export default function WalletPage() {
       return updated as unknown as ParsedPolicyDraft;
     });
 
-    setMissingFields((prev) => prev.filter((field) => field !== path));
   };
+
+  const isUnknown = (path: string) => {
+    const value = path.split(".").reduce<unknown>((current, key) => {
+      if (typeof current !== "object" || current === null) return undefined;
+      return (current as Record<string, unknown>)[key];
+    }, draftPolicy);
+
+    return value === null || value === undefined || value === "";
+  };
+
+  const missingRequiredFields = requiredConfirmationFields.filter(isUnknown);
 
   const selectWallet = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -98,8 +118,6 @@ export default function WalletPage() {
 
     setIsSubmitting(true);
     setError("");
-    setIsConfirmed(false);
-
     try {
       const res = await fetch(`${API_URL}/parse-policy`, {
         method: "POST",
@@ -114,7 +132,6 @@ export default function WalletPage() {
 
       const data = (await res.json()) as ParsePolicyResponse;
       setDraftPolicy(data.policy);
-      setMissingFields(data.missingFields || []);
       setStep("review");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error parsing policy.");
@@ -125,6 +142,11 @@ export default function WalletPage() {
 
   const confirmPolicy = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (missingRequiredFields.length > 0) {
+      setError("Please answer every yellow required field before confirming the policy.");
+      return;
+    }
+
     setIsSubmitting(true);
     setError("");
 
@@ -143,7 +165,7 @@ export default function WalletPage() {
         throw new Error(errData.detail?.[0]?.msg || "Validation failed.");
       }
 
-      setIsConfirmed(true);
+      router.push("/verdict");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Confirmation failed.");
     } finally {
@@ -259,8 +281,8 @@ export default function WalletPage() {
                       Here is what we extracted
                     </h2>
                     <p className="mt-1 text-sm text-slate-500">
-                      All fields are listed in schema order and are fully
-                      editable.
+                      Yellow sections contain values the policy did not specify.
+                      Complete every field marked Required before confirming.
                     </p>
                   </div>
                   <CheckCircle2
@@ -273,7 +295,7 @@ export default function WalletPage() {
               {/* List of Extracted Fields in Exact Schema Order */}
               <div className="space-y-6">
                 {/* 1. Raw Instructions */}
-                <SectionBlock title="1. Raw Instructions">
+                <SectionBlock title="1. Raw Instructions" needsAttention={isUnknown("raw_instructions")}>
                   <InputField
                     label="Raw Instructions"
                     value={draftPolicy.raw_instructions || ""}
@@ -284,7 +306,15 @@ export default function WalletPage() {
                 </SectionBlock>
 
                 {/* 2. Spending */}
-                <SectionBlock title="2. Spending Controls">
+                <SectionBlock
+                  title="2. Spending Controls"
+                  needsAttention={[
+                    "spending.per_item_purchase_price_max",
+                    "spending.currency",
+                    "spending.per_period_purchase_price_max",
+                    "spending.period_in_days",
+                  ].some(isUnknown)}
+                >
                   <InputField
                     label="Max Price Per Item"
                     type="number"
@@ -298,10 +328,12 @@ export default function WalletPage() {
                         val ? parseFloat(val) : null,
                       )
                     }
+                    required
+                    needsAttention={isUnknown("spending.per_item_purchase_price_max")}
                   />
                   <SelectField
                     label="Currency"
-                    value={draftPolicy.spending?.currency || "CHF"}
+                    value={draftPolicy.spending?.currency || ""}
                     options={[
                       { label: "CHF", value: "CHF" },
                       { label: "USD", value: "USD" },
@@ -310,6 +342,8 @@ export default function WalletPage() {
                     onChange={(val) =>
                       updatePolicyValue("spending.currency", val || null)
                     }
+                    required
+                    needsAttention={isUnknown("spending.currency")}
                   />
                   <InputField
                     label="Max Price Per Period"
@@ -324,6 +358,7 @@ export default function WalletPage() {
                         val ? parseFloat(val) : null,
                       )
                     }
+                    needsAttention={isUnknown("spending.per_period_purchase_price_max")}
                   />
 
                   <InputField
@@ -337,11 +372,15 @@ export default function WalletPage() {
                         val ? parseInt(val) : null,
                       )
                     }
+                    needsAttention={isUnknown("spending.period_in_days")}
                   />
                 </SectionBlock>
 
                 {/* 3. Merchant */}
-                <SectionBlock title="3. Merchant Rules">
+                <SectionBlock
+                  title="3. Merchant Rules"
+                  needsAttention={isUnknown("merchant.familiarity_required")}
+                >
                   <SelectField
                     label="Familiarity Required"
                     value={
@@ -359,11 +398,19 @@ export default function WalletPage() {
                         val === "" ? null : val === "true",
                       )
                     }
+                    required
+                    needsAttention={isUnknown("merchant.familiarity_required")}
                   />
                 </SectionBlock>
 
                 {/* 4. Order Terms */}
-                <SectionBlock title="4. Order Terms">
+                <SectionBlock
+                  title="4. Order Terms"
+                  needsAttention={[
+                    "order_terms.require_returnable",
+                    "order_terms.require_cancellable",
+                  ].some(isUnknown)}
+                >
                   <SelectField
                     label="Require Returnable"
                     value={
@@ -381,6 +428,8 @@ export default function WalletPage() {
                         val === "" ? null : val === "true",
                       )
                     }
+                    required
+                    needsAttention={isUnknown("order_terms.require_returnable")}
                   />
                   <SelectField
                     label="Require Cancellable"
@@ -399,11 +448,39 @@ export default function WalletPage() {
                         val === "" ? null : val === "true",
                       )
                     }
+                    required
+                    needsAttention={isUnknown("order_terms.require_cancellable")}
                   />
                 </SectionBlock>
 
                 {/* 5. Session */}
-                <SectionBlock title="5. Session Restrictions">
+                <SectionBlock
+                  title="5. Session Restrictions"
+                  needsAttention={[
+                    "session.trusted_devices_only",
+                    "session.domestic_only",
+                  ].some(isUnknown)}
+                >
+                  <SelectField
+                    label="Trusted Devices Only"
+                    value={
+                      draftPolicy.session?.trusted_devices_only === null
+                        ? ""
+                        : String(draftPolicy.session?.trusted_devices_only)
+                    }
+                    options={[
+                      { label: "Yes", value: "true" },
+                      { label: "No", value: "false" },
+                    ]}
+                    onChange={(val) =>
+                      updatePolicyValue(
+                        "session.trusted_devices_only",
+                        val === "" ? null : val === "true",
+                      )
+                    }
+                    required
+                    needsAttention={isUnknown("session.trusted_devices_only")}
+                  />
                   <SelectField
                     label="Domestic Purchases Only"
                     value={
@@ -421,26 +498,11 @@ export default function WalletPage() {
                         val === "" ? null : val === "true",
                       )
                     }
+                    required
+                    needsAttention={isUnknown("session.domestic_only")}
                   />
                 </SectionBlock>
               </div>
-
-              {isConfirmed && (
-                <div className="rounded-2xl bg-slate-900 p-5 text-center text-white">
-                  <p className="font-semibold">
-                    Policy confirmed for Wallet {walletId}.
-                  </p>
-                  <p className="mt-1 text-sm text-slate-300">
-                    The control layer is active for your shopping agent.
-                  </p>
-                  <Link
-                    href="/verdict"
-                    className="mt-4 inline-flex rounded-lg bg-white px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-100"
-                  >
-                    View classification verdict
-                  </Link>
-                </div>
-              )}
 
               {error && <ErrorMessage message={error} />}
 
@@ -453,16 +515,14 @@ export default function WalletPage() {
                 >
                   <ArrowLeft size={18} /> Edit prompt
                 </button>
-                {!isConfirmed && (
-                  <button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className="flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-3.5 font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
-                  >
-                    {isSubmitting ? "Confirming..." : "Confirm policy"}{" "}
-                    <Check size={18} />
-                  </button>
-                )}
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="flex items-center gap-2 rounded-xl bg-emerald-600 px-6 py-3.5 font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
+                >
+                  {isSubmitting ? "Confirming..." : "Confirm policy"}{" "}
+                  <Check size={18} />
+                </button>
               </div>
             </form>
           )}
@@ -475,12 +535,20 @@ export default function WalletPage() {
 function SectionBlock({
   title,
   children,
+  needsAttention = false,
 }: {
   title: string;
   children: React.ReactNode;
+  needsAttention?: boolean;
 }) {
   return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div
+      className={`rounded-3xl border p-6 shadow-sm ${
+        needsAttention
+          ? "border-amber-300 bg-amber-50"
+          : "border-slate-200 bg-white"
+      }`}
+    >
       <h3 className="mb-4 text-base font-bold text-slate-900">{title}</h3>
       <div className="flex flex-col gap-4">{children}</div>
     </div>
@@ -493,22 +561,29 @@ function InputField({
   onChange,
   type = "text",
   placeholder = "",
+  required = false,
+  needsAttention = false,
 }: {
   label: string;
   value: string | number;
   onChange: (val: string) => void;
   type?: string;
   placeholder?: string;
+  required?: boolean;
+  needsAttention?: boolean;
 }) {
   return (
     <label className="block text-sm font-semibold text-slate-700">
-      {label}
+      {label} {required && <span className="text-amber-800">Required</span>}
       <input
         type={type}
         value={value}
         placeholder={placeholder}
+        required={required}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-2.5 font-normal outline-none focus:border-emerald-500"
+        className={`mt-1 w-full rounded-xl border px-4 py-2.5 font-normal outline-none focus:border-emerald-500 ${
+          needsAttention ? "border-amber-300 bg-amber-50" : "border-slate-300 bg-white"
+        }`}
       />
     </label>
   );
@@ -519,21 +594,28 @@ function SelectField({
   value,
   options,
   onChange,
+  required = false,
+  needsAttention = false,
 }: {
   label: string;
   value: string;
   options: { label: string; value: string }[];
   onChange: (val: string) => void;
+  required?: boolean;
+  needsAttention?: boolean;
 }) {
   return (
     <label className="block text-sm font-semibold text-slate-700">
-      {label}
+      {label} {required && <span className="text-amber-800">Required</span>}
       <select
         value={value}
+        required={required}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 font-normal outline-none focus:border-emerald-500"
+        className={`mt-1 w-full rounded-xl border px-4 py-2.5 font-normal outline-none focus:border-emerald-500 ${
+          needsAttention ? "border-amber-300 bg-amber-50" : "border-slate-300 bg-white"
+        }`}
       >
-        <option value="">Don&apos;t care</option>
+        <option value="">{required ? "Select an option" : "Don&apos;t care"}</option>
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
             {opt.label}
