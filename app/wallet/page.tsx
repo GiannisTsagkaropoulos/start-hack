@@ -8,17 +8,20 @@ import {
   ArrowRight,
   Check,
   CheckCircle2,
-  PlusCircle,
-  RefreshCw,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
+import {
+  ParsePolicyResponse,
+  ParsedPolicyDraft,
+  toLocalMandateV2,
+} from "@/lib/viseca-control-layer";
 
 type Step = "select" | "describe" | "review";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-const DEFAULT_POLICY = {
+const DEFAULT_POLICY: ParsedPolicyDraft = {
   raw_instructions: "",
   spending: {
     per_item_purchase_price_max: null,
@@ -51,12 +54,10 @@ export default function WalletPage() {
   const [step, setStep] = useState<Step>("select");
   const [walletId, setWalletId] = useState("");
   const [policyText, setPolicyText] = useState("");
-  const [additionalText, setAdditionalText] = useState("");
-  const [missingFields, setMissingFields] = useState<string[]>([]);
-  const [draftPolicy, setDraftPolicy] = useState<any>(DEFAULT_POLICY);
+  const [, setMissingFields] = useState<string[]>([]);
+  const [draftPolicy, setDraftPolicy] = useState<ParsedPolicyDraft>(DEFAULT_POLICY);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isReparsing, setIsReparsing] = useState(false);
   const [error, setError] = useState("");
   const [isConfirmed, setIsConfirmed] = useState(false);
 
@@ -65,17 +66,20 @@ export default function WalletPage() {
     [step],
   );
 
-  const updatePolicyValue = (path: string, value: any) => {
+  const updatePolicyValue = (path: string, value: unknown) => {
     const keys = path.split(".");
-    setDraftPolicy((prev: any) => {
-      const updated = structuredClone(prev);
+    setDraftPolicy((prev) => {
+      const updated = structuredClone(prev) as unknown as Record<string, unknown>;
       let current = updated;
       for (let i = 0; i < keys.length - 1; i++) {
-        if (!current[keys[i]]) current[keys[i]] = {};
-        current = current[keys[i]];
+        const next = current[keys[i]];
+        if (typeof next !== "object" || next === null || Array.isArray(next)) {
+          current[keys[i]] = {};
+        }
+        current = current[keys[i]] as Record<string, unknown>;
       }
       current[keys[keys.length - 1]] = value;
-      return updated;
+      return updated as unknown as ParsedPolicyDraft;
     });
 
     setMissingFields((prev) => prev.filter((field) => field !== path));
@@ -108,7 +112,7 @@ export default function WalletPage() {
 
       if (!res.ok) throw new Error("Failed to parse the policy.");
 
-      const data = await res.json();
+      const data = (await res.json()) as ParsePolicyResponse;
       setDraftPolicy(data.policy);
       setMissingFields(data.missingFields || []);
       setStep("review");
@@ -116,37 +120,6 @@ export default function WalletPage() {
       setError(err instanceof Error ? err.message : "Error parsing policy.");
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const handleReparseWithMoreInfo = async () => {
-    if (!additionalText.trim()) return;
-
-    setIsReparsing(true);
-    setError("");
-
-    try {
-      const res = await fetch(`${API_URL}/parse-policy`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          wallet_id: Number(walletId),
-          policy_text: policyText,
-          additional_text: additionalText,
-        }),
-      });
-
-      if (!res.ok) throw new Error("Failed to update policy with new details.");
-
-      const data = await res.json();
-      setDraftPolicy(data.policy);
-      setMissingFields(data.missingFields || []);
-      setPolicyText((prev) => `${prev}\n\n${additionalText}`);
-      setAdditionalText("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Error updating policy.");
-    } finally {
-      setIsReparsing(false);
     }
   };
 
@@ -161,7 +134,7 @@ export default function WalletPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           wallet_id: Number(walletId),
-          policy: draftPolicy,
+          policy: toLocalMandateV2(draftPolicy, policyText),
         }),
       });
 
@@ -460,6 +433,12 @@ export default function WalletPage() {
                   <p className="mt-1 text-sm text-slate-300">
                     The control layer is active for your shopping agent.
                   </p>
+                  <Link
+                    href="/verdict"
+                    className="mt-4 inline-flex rounded-lg bg-white px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-100"
+                  >
+                    View classification verdict
+                  </Link>
                 </div>
               )}
 
@@ -516,7 +495,7 @@ function InputField({
   placeholder = "",
 }: {
   label: string;
-  value: any;
+  value: string | number;
   onChange: (val: string) => void;
   type?: string;
   placeholder?: string;
@@ -554,7 +533,7 @@ function SelectField({
         onChange={(e) => onChange(e.target.value)}
         className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 font-normal outline-none focus:border-emerald-500"
       >
-        <option value="">Don't care</option>
+        <option value="">Don&apos;t care</option>
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
             {opt.label}
